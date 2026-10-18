@@ -76,10 +76,28 @@ def test_cli_person_ids_subset(tmp_path: Path) -> None:
     rc = main([str(SAMPLE_TREE), str(out), "--no-gzip",
                "--person-ids", ",".join(str(i) for i in ids)])
     assert rc == 0
+    ns = "{http://gramps-project.org/xml/1.7.2/}"
     root = ET.fromstring(out.read_bytes())
-    people = root.findall("{http://gramps-project.org/xml/1.7.2/}people/"
-                          "{http://gramps-project.org/xml/1.7.2/}person")
+    people = root.findall(f"{ns}people/{ns}person")
     assert len(people) == 2
+
+    # v2.1 narrowing: citations get filtered too. The full export
+    # has more citations than the subset export because citations
+    # are restricted to those referenced by exported owners.
+    citations_sub = root.findall(f"{ns}citations/{ns}citation")
+    sub_count = len(citations_sub)
+    assert sub_count > 0, "subset export should still have citations"
+
+    # Run again with no --person-ids (full export) and compare.
+    full_out = tmp_path / "full.gramps"
+    rc = main([str(SAMPLE_TREE), str(full_out), "--no-gzip"])
+    assert rc == 0
+    full_root = ET.fromstring(full_out.read_bytes())
+    full_count = len(full_root.findall(f"{ns}citations/{ns}citation"))
+    assert full_count > sub_count, (
+        f"subset citations ({sub_count}) should be < full citations "
+        f"({full_count}) — narrowing didn't narrow"
+    )
 
 
 def test_cli_missing_input(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

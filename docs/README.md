@@ -13,18 +13,28 @@ fact-type vocabulary, full citation detail, multimedia links, and
 the full place hierarchy. This tool goes directly from `.rmtree` to
 `.gramps` and preserves all of that.
 
-## Status: v1
+## Status: v2.1
 
-v1 emits the core four Gramps object types — people, events,
-families, places. Citations, sources, notes, media, and repositories
-are deferred to v2 (they require per-link, per-`OwnerType` walks of
-RM's `*LinkTable` polymorphism — see
-`tools/rmread/docs/rm11-schema.md` § "Conventions every `*LinkTable`
-shares" for why they're a separate slice).
+v2.1 emits the core four (people, events, families, places) **plus
+citations and sources**. Citations are narrowed to ones referenced
+by exported owners — no dangling citations. Sources are exported
+unconditionally (a researcher may have books in the library not
+yet cited), but only those whose citations are referenced
+contribute `<citation>` elements.
 
-A v1 export opens in Gramps and shows a coherent tree but no source
-citations or media. Researchers who need those use RM's own GEDCOM
-exporter for now and the v2 tool once it lands.
+Citation `<sourceref>` always resolves; `<citationref>` always
+resolves; Gramps can import without errors. The
+`CitationLinkTable` `OwnerType` 0/1/2 buckets are wired
+(Person / Family / Source); unknown values (7, 19, anything else)
+are warned once and skipped — RM-internal extensions whose target
+owner type is not enumerable from the link row alone.
+
+`<confidence>2</confidence>` is hard-coded (RM has no direct
+equivalent — `CitationLinkTable.Quality` is text, not int).
+`<sformat>book</sformat>` is hard-coded on every source
+(SourceTemplate mapping deferred — RM proprietary).
+
+Notes, media, and repositories remain deferred to v2.2.
 
 ## Install
 
@@ -96,6 +106,11 @@ the same second are byte-equal).
 | Event | `_g_e<EventID>` | `E0001`, `E0002`, … |
 | Family | `_g_f<FamilyID>` | `F0001`, `F0002`, … |
 | Place | `_g_p<PlaceID>` | `P0001`, `P0002`, … |
+| Source | `_g_s<SourceID>` | `S0001`, `S0002`, … | (v2.1)
+| Citation | `_g_c<CitationID>` | `C0001`, `C0002`, … | (v2.1)
+| Note | `_g_n<NoteID>` (planned) | `N0001`, … | (v2.2)
+| Media | `_g_o<MediaID>` (planned) | `O0001`, … | (v2.2)
+| Repository | `_g_r<AddressID>` (planned) | `R0001`, … | (v2.2)
 
 Mirrors the format Gramps itself emits. The display id `I0001` is
 **not stable across databases** — the RM `PersonID` it derives from

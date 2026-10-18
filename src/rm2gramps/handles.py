@@ -37,6 +37,16 @@ def place_handle(place_id: int) -> str:
     return f"_g_p{place_id}"
 
 
+def source_handle(source_id: int) -> str:
+    """Derive a Gramps handle from a SourceTable.SourceID. (v2.1)"""
+    return f"_g_s{source_id}"
+
+
+def citation_handle(citation_id: int) -> str:
+    """Derive a Gramps handle from a CitationTable.CitationID. (v2.1)"""
+    return f"_g_c{citation_id}"
+
+
 def format_display_id(numeric_id: int, prefix: str) -> str:
     """Format a Gramps display id like ``I0001`` / ``E0123``."""
     return f"{prefix}{numeric_id:04d}"

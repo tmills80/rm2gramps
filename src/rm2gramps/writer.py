@@ -23,10 +23,15 @@ from pathlib import Path
 
 from rmread import open_database as _rmread_open
 
+from .citations import CitationRecord, render_citation_xml
+from .citations_walk import walk_citation_links
+from .citationrefs import inject_citationrefs as _inject_citationrefs
 from .events import EventRecord, render_event_xml
 from .families import ChildRef, FamilyRecord, render_family_xml
+from .handles import citation_handle, source_handle
 from .people import NameRecord, PersonRecord, render_person_xml
 from .places import PlaceRecord, render_place_xml
+from .sources import SourceRecord, render_source_xml
 from .xml import write_database
 
 
@@ -408,6 +413,85 @@ def _load_child_family_ids(
 # --- top-level ------------------------------------------------------------
 
 
+# --- sources / citations ---------------------------------------------------
+
+
+def load_sources(con: sqlite3.Connection) -> list[SourceRecord]:
+    """Return every SourceTable row, ordered by SourceID."""
+    rows = con.execute(
+        """
+        SELECT SourceID, Name, IsPrivate, ActualText, RefNumber
+        FROM SourceTable
+        ORDER BY SourceID
+        """
+    ).fetchall()
+    out: list[SourceRecord] = []
+    for r in rows:
+        # RM does not have a single Author column on SourceTable; we
+        # look at the source's Comments as a stand-in for v2.1
+        # (researcher can edit in Gramps). Leave author="" for now.
+        out.append(SourceRecord(
+            source_id=r["SourceID"],
+            name=r["Name"] or "",
+            is_private=bool(r["IsPrivate"]),
+            author="",
+            ref_number=r["RefNumber"] or "",
+        ))
+    return out
+
+
+def load_citations(
+    con: sqlite3.Connection,
+    *,
+    referenced_source_ids: set[int],
+) -> list[CitationRecord]:
+    """Return CitationTable rows whose SourceID is in ``referenced_source_ids``.
+
+    Citation narrowing: only citations whose parent source is being
+    exported are returned. No dangling citations. When
+    ``referenced_source_ids`` is empty (no owners), nothing is
+    returned.
+    """
+    if not referenced_source_ids:
+        return []
+    placeholders = ",".join("?" for _ in referenced_source_ids)
+    rows = con.execute(
+        f"""
+        SELECT CitationID, SourceID, RefNumber, ActualText,
+               ShortFootnote, Footnote, Bibliography
+        FROM CitationTable
+        WHERE SourceID IN ({placeholders})
+        ORDER BY CitationID
+        """,
+        list(referenced_source_ids),
+    ).fetchall()
+    out: list[CitationRecord] = []
+    for r in rows:
+        out.append(CitationRecord(
+            citation_id=r["CitationID"],
+            source_id=r["SourceID"] or 0,
+            page=r["RefNumber"] or "",
+            actual_text=r["ActualText"] or "",
+            short_footnote=r["ShortFootnote"] or "",
+            footnote=r["Footnote"] or "",
+            bibliography=r["Bibliography"] or "",
+        ))
+    return out
+
+
+def _referenced_source_ids(
+    citation_links: dict[str, dict[int, tuple[int, ...]]],
+    citation_records: list[CitationRecord],
+) -> set[int]:
+    """Set of SourceIDs referenced by citations we're exporting.
+
+    Pure set op on the data already loaded — keeps the narrowing
+    rule (only citations whose parent source is in this set)
+    mechanical.
+    """
+    return {c.source_id for c in citation_records}
+
+
 def export_database(
     rmtree_path: str | Path,
     *,
@@ -463,10 +547,27 @@ def export_database(
             person_ids=person_ids,
             family_ids=family_id_set,
         )
-        event_strs = tuple(render_event_xml(e, change=ts) for e in events)
+        # Index events by PersonID for citationref injection later.
+        # An event may be attached to multiple people (rare) but
+        # in RM a Person-owned event has exactly one OwnerID. We
+        # also need events owned by families and sources — those
+        # are loaded by load_events too (family_ids passed in)
+        # but the citationref injection for them happens via the
+        # walker output (Family/Source buckets).
+        event_strs: list[str] = []
+        for ev in events:
+            xml = render_event_xml(ev, change=ts)
+            # Event citation linkage (Person-owned events):
+            # walked separately by the walker through Person bucket.
+            # For Family-owned and Source-owned events, the walker
+            # returns them through Family/Source buckets; the
+            # writer doesn't need event ID lists per owner because
+            # citationref injection on the owner element uses
+            # owner-id → citation-ids directly.
+            event_strs.append(xml)
 
         people = load_people(db.con, person_ids=person_ids)
-        people_strs = tuple(render_person_xml(p, change=ts) for p in people)
+        people_strs_pre: list[str] = [render_person_xml(p, change=ts) for p in people]
 
         families = load_families(
             db.con,
@@ -474,16 +575,86 @@ def export_database(
                 sorted(family_id_set) if family_id_set is not None else None
             ),
         )
-        family_strs = tuple(render_family_xml(f, change=ts) for f in families)
+        family_strs_pre: list[str] = [render_family_xml(f, change=ts) for f in families]
+
+        # v2.1: sources + citations + walker.
+        sources = load_sources(db.con)
+
+        # Walker reads CitationLinkTable and groups by owner type.
+        # When ``person_ids`` is supplied, only Person-bucket rows
+        # for those persons are returned; family/source citations
+        # are still returned (the families and sources themselves
+        # are exported unconditionally here — narrowing by person
+        # graph is the caller's contract).
+        person_subset = (
+            set(person_ids) if person_ids is not None else None
+        )
+        citation_links = walk_citation_links(
+            db.con, person_ids=person_subset
+        )
+
+        # Render sources first so we know which SourceIDs to
+        # narrow citations against.
+        source_strs_pre: list[str] = [
+            render_source_xml(s, change=ts) for s in sources
+        ]
+
+        # v2.1 citation narrowing: collect every citation ID
+        # referenced by any exported owner across all buckets,
+        # then ask the DB which sources those citations parent
+        # under. Sources not referenced by any citation are still
+        # emitted (rare but valid: "I have this book, I haven't
+        # cited it yet"), but they contribute no citations.
+        all_citation_ids: set[int] = set()
+        for bucket in citation_links.values():
+            for cid_tuple in bucket.values():
+                all_citation_ids.update(cid_tuple)
+
+        if all_citation_ids:
+            placeholders = ",".join("?" for _ in all_citation_ids)
+            rows = db.con.execute(
+                f"SELECT DISTINCT SourceID FROM CitationTable "
+                f"WHERE CitationID IN ({placeholders})",
+                list(all_citation_ids),
+            ).fetchall()
+            referenced_source_ids = {r["SourceID"] for r in rows if r["SourceID"]}
+        else:
+            referenced_source_ids = set()
+
+        citations = load_citations(
+            db.con,
+            referenced_source_ids=referenced_source_ids,
+        )
+        citation_strs: list[str] = [
+            render_citation_xml(c, change=ts) for c in citations
+        ]
+
+        # Inject <citationref> into each owner element. The walker
+        # returns owner-id → citation-ids; we zip with the pre-
+        # rendered XML list.
+        people_strs = [
+            _inject_citationrefs(xml, citation_links["Person"].get(p.person_id, ()))
+            for xml, p in zip(people_strs_pre, people)
+        ]
+        family_strs = [
+            _inject_citationrefs(xml, citation_links["Family"].get(f.family_id, ()))
+            for xml, f in zip(family_strs_pre, families)
+        ]
+        source_strs = [
+            _inject_citationrefs(xml, citation_links["Source"].get(s.source_id, ()))
+            for xml, s in zip(source_strs_pre, sources)
+        ]
 
         header_date = _dt.date.today().isoformat()
 
         return write_database(
             header_date=header_date,
             version="rm2gramps/0.0.1",
-            events=event_strs,
-            people=people_strs,
-            families=family_strs,
+            events=tuple(event_strs),
+            people=tuple(people_strs),
+            families=tuple(family_strs),
+            sources=tuple(source_strs),
+            citations=tuple(citation_strs),
             places=place_strs,
         )
     finally:

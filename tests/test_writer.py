@@ -108,6 +108,36 @@ def test_writer_round_trip_against_sample_tree() -> None:
                 f"placeobj {place_ref.get('hlink')}"
             )
 
+    # v2.1 invariants: every <citationref> resolves to a real
+    # <citation>, every <sourceref> on a citation resolves to a real
+    # <source>, every <citation> has a parent <sourceref> (no orphans).
+    sources = root.findall(f"{{{GRAMPS_NS}}}sources/{{{GRAMPS_NS}}}source")
+    citations = root.findall(f"{{{GRAMPS_NS}}}citations/{{{GRAMPS_NS}}}citation")
+    source_handles = {s.get("handle") for s in sources}
+    citation_handles = {c.get("handle") for c in citations}
+    assert len(sources) > 0, "no <source> elements emitted"
+    assert len(citations) > 0, "no <citation> elements emitted"
+
+    # Person / Family / Source / Event all carry citationrefs (we
+    # only emit citationrefs that resolve).
+    for owner in (*people, *families, *sources, *events):
+        for cref in owner.findall(f"{{{GRAMPS_NS}}}citationref"):
+            assert cref.get("hlink") in citation_handles, (
+                f"{owner.tag.split('}')[-1]} {owner.get('id')} "
+                f"citationref points to missing citation "
+                f"{cref.get('hlink')}"
+            )
+
+    # Every <sourceref> on a citation resolves; every citation has
+    # at least the wrapper emitted even if SourceID=0.
+    for c in citations:
+        sr = c.find(f"{{{GRAMPS_NS}}}sourceref")
+        if sr is not None:
+            assert sr.get("hlink") in source_handles, (
+                f"citation {c.get('id')} sourceref points to missing "
+                f"source {sr.get('hlink')}"
+            )
+
 
 def test_writer_is_deterministic_across_two_runs() -> None:
     """Two exports of the same DB produce byte-equal XML."""

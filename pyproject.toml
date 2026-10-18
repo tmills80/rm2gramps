@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rm2gramps"
+version = "0.0.1"
+description = "Convert RootsMagic 11 .rmtree SQLite databases to Gramps XML .gramps files."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+rm2gramps = "rm2gramps.cli.export:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

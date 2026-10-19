@@ -29,11 +29,19 @@ from .citationrefs import inject_citationrefs as _inject_citationrefs
 from .citationrefs import inject_refs as _inject_refs
 from .events import EventRecord, render_event_xml
 from .families import ChildRef, FamilyRecord, render_family_xml
-from .handles import citation_handle, note_handle, source_handle
+from .handles import (
+    citation_handle,
+    media_handle,
+    note_handle,
+    repository_handle,
+    source_handle,
+)
+from .media import MediaRecord, render_media_xml
 from .notes import render_note_xml
 from .notes_dedup import load_notes, note_ids_for_texts
 from .people import NameRecord, PersonRecord, render_person_xml
 from .places import PlaceRecord, render_place_xml
+from .repositories import RepositoryRecord, render_repository_xml
 from .sources import SourceRecord, render_source_xml
 from .xml import write_database
 
@@ -705,6 +713,49 @@ def export_database(
         # owner element. Saves repeating the same 11-element
         # pattern across the v1 / v2.1 / v2.2 cross-references.
 
+        # Build (OwnerType, OwnerID) tuples for media narrowing.
+        # 0=Person, 2=Source, 3=Citation, 4=Event. Family (1)
+        # excluded — SampleTree has no MediaLink rows with
+        # OwnerType=1 and Gramps <family> can carry media too.
+        media_owner_ids: set[tuple[int, int]] = set()
+        for p in people:
+            media_owner_ids.add((0, p.person_id))
+        for s in sources:
+            media_owner_ids.add((2, s.source_id))
+        for c in citations:
+            media_owner_ids.add((3, c.citation_id))
+        for e in events:
+            media_owner_ids.add((4, e.event_id))
+
+        # v2.2: load media + repositories.
+        media_records = load_media(db.con, linked_to_owner_ids=media_owner_ids)
+        repository_records = load_repositories(
+            db.con, linked_to_citation_ids=citation_id_set,
+        )
+
+        # Build owner → media_id map for mediaref injection.
+        media_link_rows = db.con.execute(
+            "SELECT MediaID, OwnerType, OwnerID FROM MediaLinkTable"
+        ).fetchall()
+        media_by_owner: dict[tuple[int, int], list[int]] = {}
+        for r in media_link_rows:
+            key = (r["OwnerType"], r["OwnerID"])
+            media_by_owner.setdefault(key, []).append(r["MediaID"])
+
+        # Build citation → repository_id map for reporef injection.
+        address_link_rows = db.con.execute(
+            "SELECT AddressID, OwnerType, OwnerID FROM AddressLinkTable"
+        ).fetchall()
+        repo_by_citation: dict[int, list[int]] = {}
+        for r in address_link_rows:
+            # AddressLinkTable OwnerType points at the citation
+            # (per SampleTree data; OwnerType=3 in v2.2's dev DB).
+            if r["OwnerType"] != 3:
+                continue
+            repo_by_citation.setdefault(r["OwnerID"], []).append(
+                r["AddressID"]
+            )
+
         def _attach(
             xml: str,
             ref_tag: str,
@@ -729,16 +780,22 @@ def export_database(
             )
             return tuple(note_handle(nid) for nid in nids)
 
-        def _citationref_for_owner(
-            owner_type: str,
+        def _mediaref_for_owner(
+            owner_type: int,
             owner_id: int,
         ) -> tuple[str, ...]:
-            return tuple(
-                citation_handle(cid)
-                for cid in citation_links.get(owner_type, {}).get(owner_id, ())
-            )
+            mids = media_by_owner.get((owner_type, owner_id), [])
+            return tuple(media_handle(mid) for mid in mids)
 
-        # Apply <noteref> + <citationref> injection across owners.
+        def _reporef_for_citation(
+            citation_id: int,
+        ) -> tuple[str, ...]:
+            aids = repo_by_citation.get(citation_id, [])
+            return tuple(repository_handle(aid) for aid in aids)
+
+        # Apply <noteref> + <mediaref> + <reporef> injection across
+        # owner types. <noteref> → 6 owner types. <mediaref> →
+        # Person / Source / Citation / Event. <reporef> → Citation.
         people_strs = [
             _attach(xml, "noteref", _noteref_for_owner("Person", p.person_id))
             for xml, p in zip(people_strs_pre, people)
@@ -767,6 +824,45 @@ def export_database(
             for xml, c in zip(citation_strs, citations)
         ]
 
+        # <mediaref> on Person (0), Source (2), Citation (3), Event (4).
+        people_strs = [
+            _attach(
+                xml, "mediaref",
+                _mediaref_for_owner(0, p.person_id),
+            )
+            for xml, p in zip(people_strs, people)
+        ]
+        source_strs = [
+            _attach(
+                xml, "mediaref",
+                _mediaref_for_owner(2, s.source_id),
+            )
+            for xml, s in zip(source_strs, sources)
+        ]
+        citation_strs = [
+            _attach(
+                xml, "mediaref",
+                _mediaref_for_owner(3, c.citation_id),
+            )
+            for xml, c in zip(citation_strs, citations)
+        ]
+        event_strs = [
+            _attach(
+                xml, "mediaref",
+                _mediaref_for_owner(4, e.event_id),
+            )
+            for xml, e in zip(event_strs, events)
+        ]
+
+        # <reporef> on Citation only.
+        citation_strs = [
+            _attach(
+                xml, "reporef",
+                _reporef_for_citation(c.citation_id),
+            )
+            for xml, c in zip(citation_strs, citations)
+        ]
+
         return write_database(
             header_date=header_date,
             version="rm2gramps/0.0.1",
@@ -777,9 +873,117 @@ def export_database(
             citations=tuple(citation_strs),
             places=place_strs,
             notes=note_strs,
+            repositories=tuple(
+                render_repository_xml(r, change=ts)
+                for r in repository_records
+            ),
+            media=tuple(
+                render_media_xml(m, change=ts) for m in media_records
+            ),
         )
     finally:
         db.close()
+
+
+# --- repositories / media -------------------------------------------------
+
+
+def load_repositories(
+    con: sqlite3.Connection,
+    *,
+    linked_to_citation_ids: set[int],
+) -> list[RepositoryRecord]:
+    """Return AddressTable rows whose AddressID is linked to a citation we exported.
+
+    Decision 3 in the v2.2 plan: any address linked to a citation
+    counts as a repository, regardless of AddressType. The walk
+    is ``CitationLinkTable.OwnerType=...`` to find citations, then
+    ``AddressLinkTable.OwnerType=3`` (or any OwnerType that points
+    at a citation) to find the addresses attached to them.
+
+    Empty ``linked_to_citation_ids`` → empty list (no dangling
+    repositories).
+    """
+    if not linked_to_citation_ids:
+        return []
+    placeholders = ",".join("?" for _ in linked_to_citation_ids)
+    rows = con.execute(
+        f"""
+        SELECT DISTINCT a.AddressID, a.Name, a.Street1, a.City,
+               a.State, a.Zip, a.Country, a.Phone1, a.Email, a.URL
+        FROM AddressTable a
+        JOIN AddressLinkTable al ON al.AddressID = a.AddressID
+        WHERE al.OwnerID IN ({placeholders})
+        ORDER BY a.AddressID
+        """,
+        list(linked_to_citation_ids),
+    ).fetchall()
+    return [
+        RepositoryRecord(
+            address_id=r["AddressID"],
+            name=r["Name"] or "",
+            street1=r["Street1"] or "",
+            city=r["City"] or "",
+            state=r["State"] or "",
+            zip_code=r["Zip"] or "",
+            country=r["Country"] or "",
+            phone=r["Phone1"] or "",
+            email=r["Email"] or "",
+            url=r["URL"] or "",
+        )
+        for r in rows
+    ]
+
+
+def load_media(
+    con: sqlite3.Connection,
+    *,
+    linked_to_owner_ids: set[tuple[int, int]],
+) -> list[MediaRecord]:
+    """Return MultimediaTable rows whose MediaID is linked to an exported owner.
+
+    Decision 2 in the v2.2 plan: media is narrowed to items
+    referenced by exported owners. ``linked_to_owner_ids`` is a
+    set of ``(OwnerType, OwnerID)`` tuples — typically built
+    from the Person / Source / Citation / Event ids in the
+    export scope. ``MediaLinkTable`` OwnerType values match
+    those: 0=Person, 1=Family, 2=Source, 3=Citation, 4=Event
+    (verified against ``example.gramps`` distribution and the
+    SampleTree schema doc).
+
+    Empty set → empty list.
+    """
+    if not linked_to_owner_ids:
+        return []
+    # We need a (OwnerType, OwnerID) IN-clause. SQLite supports
+    # row-value comparison for this, but to keep it simple we
+    # OR together per-type filters.
+    placeholders_per_pair = ",".join("(?,?)" for _ in linked_to_owner_ids)
+    flat: list = []
+    for otype, oid in linked_to_owner_ids:
+        flat.extend([otype, oid])
+    rows = con.execute(
+        f"""
+        SELECT DISTINCT m.MediaID, m.MediaFile, m.MediaPath, m.URL,
+               m.MediaType, m.Description
+        FROM MultimediaTable m
+        JOIN MediaLinkTable ml ON ml.MediaID = m.MediaID
+        WHERE (ml.OwnerType, ml.OwnerID) IN ({placeholders_per_pair})
+        ORDER BY m.MediaID
+        """,
+        flat,
+    ).fetchall()
+    return [
+        MediaRecord(
+            media_id=r["MediaID"],
+            media_file=r["MediaFile"] or "",
+            media_path=r["MediaPath"] or "",
+            url=r["URL"] or "",
+            media_type=r["MediaType"] or 0,
+            description=r["Description"] or "",
+        )
+        for r in rows
+    ]
 
 
 def _load_note_texts_by_owner(

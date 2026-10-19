@@ -48,6 +48,8 @@ def write_database(
     citations: Sequence[str] = (),
     places: Sequence[str],
     notes: Sequence[str] = (),
+    repositories: Sequence[str] = (),
+    media: Sequence[str] = (),
 ) -> bytes:
     """Render the full Gramps XML document as UTF-8 bytes.
 
@@ -57,12 +59,14 @@ def write_database(
         ISO date (``YYYY-MM-DD``) for ``<created date=\"…\">``.
     version
         Free-form version string for ``<created version=\"…\">``.
-    events, people, families, sources, citations, places, notes
+    events, people, families, sources, citations, places, notes,
+        repositories, media
         Tuples of pre-rendered element strings (one per object) as
         produced by the v1 renderers (``events.render_event_xml``
         etc.), v2.1 (``sources.render_source_xml``,
         ``citations.render_citation_xml``), and v2.2
-        (``notes.render_note_xml``).
+        (``notes.render_note_xml``, ``media.render_media_xml``,
+        ``repositories.render_repository_xml``).
     """
     parts: list[str] = [
         '<?xml version="1.0" encoding="UTF-8"?>\n',
@@ -76,10 +80,12 @@ def write_database(
 
     # Section order matches Gramps' own export convention (verified
     # against ``example.gramps``): events → people → families →
-    # sources → citations → places → notes. Notes are last
-    # because they're leaf objects referenced from many places
-    # via <noteref>; the export reads top-down and leaf objects go
-    # at the bottom.
+    # sources → citations → places → repositories → media → notes.
+    # Notes / media / repositories are leaf objects referenced
+    # from many places via <noteref>/<mediaref>/<reporef>;
+    # they sit at the bottom of the document. Repositories before
+    # media before notes — coarse object types first, finer
+    # cross-references last.
     sections: list[tuple[str, Sequence[str]]] = [
         ("events", events),
         ("people", people),
@@ -87,6 +93,8 @@ def write_database(
         ("sources", sources),
         ("citations", citations),
         ("places", places),
+        ("repositories", repositories),
+        ("media", media),
         ("notes", notes),
     ]
     for name, items in sections:

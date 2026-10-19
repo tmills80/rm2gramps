@@ -168,6 +168,29 @@ def test_writer_round_trip_against_sample_tree() -> None:
                 f"emitted but no owner references it — dangling note"
             )
 
+    # v2.2 invariants: every <mediaref> resolves to a real <object>,
+    # every <reporef> resolves to a real <repository>.
+    objects = root.findall(f"{{{GRAMPS_NS}}}media/{{{GRAMPS_NS}}}object")
+    repos = root.findall(
+        f"{{{GRAMPS_NS}}}repositories/{{{GRAMPS_NS}}}repository"
+    )
+    if objects:
+        object_handles = {o.get("handle") for o in objects}
+        for owner in (*people, *sources, *citations, *events):
+            for mref in owner.findall(f"{{{GRAMPS_NS}}}mediaref"):
+                assert mref.get("hlink") in object_handles, (
+                    f"{owner.tag.split('}')[-1]} {owner.get('id')} "
+                    f"mediaref points to missing object {mref.get('hlink')}"
+                )
+    if repos:
+        repo_handles = {r.get("handle") for r in repos}
+        for c in citations:
+            for rref in c.findall(f"{{{GRAMPS_NS}}}reporef"):
+                assert rref.get("hlink") in repo_handles, (
+                    f"citation {c.get('id')} reporef points to missing "
+                    f"repository {rref.get('hlink')}"
+                )
+
 
 def test_writer_is_deterministic_across_two_runs() -> None:
     """Two exports of the same DB produce byte-equal XML."""

@@ -732,21 +732,35 @@ def export_database(
         # by an owner we are actually exporting, then ask the DB which
         # sources those citations parent under.
         #
-        # On a subset export the Source bucket is deliberately NOT
-        # included. A citation owned by a Source is reachable only
-        # from that source, not from any person — so honouring it
-        # would drag in every citation of every source in the tree
-        # (420 of 432 in SampleTree) for a two-person export. Those
-        # citations are re-derived below for the sources that survive
-        # narrowing.
-        buckets = ["Person", "Family", "Source"]
+        # On a subset export the Source and Citation buckets are
+        # deliberately excluded. A citation owned by a Source is
+        # reachable only from that source, not from any person — so
+        # honouring it would drag in every citation of every source in
+        # the tree for a two-person export.
+        #
+        # Citation ids referenced by an owner we are actually
+        # exporting. On a subset export, only the Person and Family
+        # buckets are filtered — an Event-owned citation is reached
+        # through its own event, which is itself in scope via the
+        # person's facts.
+        buckets = ["Person", "Family", "Event", "Source", "Citation"]
         if person_ids is not None:
-            buckets = ["Person", "Family"]
-
-        all_citation_ids: set[int] = set()
-        for bucket in buckets:
-            for cid_tuple in citation_links[bucket].values():
-                all_citation_ids.update(cid_tuple)
+            # On a subset export only Person, Family and the events
+            # that belong to them are in scope. An event-owned
+            # citation is only reachable if its event is exported.
+            exported_event_ids = {e.event_id for e in events}
+            all_citation_ids: set[int] = set()
+            for bucket in ("Person", "Family"):
+                for cid_tuple in citation_links[bucket].values():
+                    all_citation_ids.update(cid_tuple)
+            for ev_id, cid_tuple in citation_links["Event"].items():
+                if ev_id in exported_event_ids:
+                    all_citation_ids.update(cid_tuple)
+        else:
+            all_citation_ids = set()
+            for bucket in buckets:
+                for cid_tuple in citation_links[bucket].values():
+                    all_citation_ids.update(cid_tuple)
 
         if all_citation_ids:
             placeholders = ",".join("?" for _ in all_citation_ids)
@@ -795,6 +809,15 @@ def export_database(
         source_strs = [
             _inject_citationrefs(xml, citation_links["Source"].get(s.source_id, ()))
             for xml, s in zip(source_strs_pre, sources)
+        ]
+        # Events own the single largest citation bucket in RM
+        # (CitationLinkTable OwnerType=2 — 604 of 702 rows in
+        # SampleTree). Until this injection existed, every one of
+        # those citations was emitted with no <citationref> pointing
+        # at it.
+        event_strs = [
+            _inject_citationrefs(xml, citation_links["Event"].get(e.event_id, ()))
+            for xml, e in zip(event_strs, events)
         ]
 
         header_date = _dt.date.today().isoformat()

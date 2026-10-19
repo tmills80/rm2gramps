@@ -32,14 +32,33 @@ from typing import TypedDict
 _log = logging.getLogger(__name__)
 
 
-# CitationLinkTable OwnerType values we know how to interpret. RM's
-# enum convention is 0/1/2 = Person/Family/Source (shared with
-# EventTable), but link tables extend it. Any value outside this
-# set is treated as unknown and skipped with a warning.
+# CitationLinkTable OwnerType → owner kind.
+#
+# RM uses ONE global OwnerType enum across every *LinkTable. Verified
+# against SampleTree.rmtree (RM 11.0) by testing which candidate owner
+# table contains all of each bucket's OwnerIDs:
+#
+#     0 = Person   1 = Family   2 = Event   3 = Source   4 = Citation
+#
+# The decisive case is OwnerType=2: SampleTree has 488 distinct
+# OwnerIDs in that bucket, and PersonTable (429), FamilyTable (142),
+# SourceTable (204) and CitationTable (438) are each too small to
+# hold that many distinct ids. EventTable (870) is the only table they
+# can reference. This assumes RM maintains referential integrity on
+# OwnerID, which the rest of the schema does.
+#
+# This map previously read 2 = "Source". That put 488 event-owned
+# citations into the Source bucket and narrowed the export against
+# the 86 of them whose ids happened to collide with real SourceIDs.
+#
+# OwnerTypes 7 and 19 also appear in SampleTree. They are outside
+# this enum and are not interpreted — they warn and are skipped.
 _OWNER_TYPE_TO_KEY: dict[int, str] = {
     0: "Person",
     1: "Family",
-    2: "Source",
+    2: "Event",
+    3: "Source",
+    4: "Citation",
 }
 
 
@@ -48,7 +67,9 @@ class CitationLinks(TypedDict):
 
     Person: dict[int, tuple[int, ...]]
     Family: dict[int, tuple[int, ...]]
+    Event: dict[int, tuple[int, ...]]
     Source: dict[int, tuple[int, ...]]
+    Citation: dict[int, tuple[int, ...]]
 
 
 def walk_citation_links(
@@ -84,8 +105,11 @@ def walk_citation_links(
         in the dict; unknown OwnerType values are logged and
         dropped.
     """
-    # Initialise the three known buckets as empty dicts.
-    out: CitationLinks = {"Person": {}, "Family": {}, "Source": {}}
+    # Initialise the known buckets as empty dicts.
+    out: CitationLinks = {
+        "Person": {}, "Family": {}, "Event": {},
+        "Source": {}, "Citation": {},
+    }
 
     sql = """
         SELECT CitationID, OwnerType, OwnerID
@@ -95,10 +119,15 @@ def walk_citation_links(
     rows = con.execute(sql).fetchall()
 
     # Per-bucket allow-list. None means "no filter for this bucket".
+    # Only Person and Family are filtered: an Event / Source /
+    # Citation bucket is reached through its own owner, not through
+    # the person graph.
     bucket_filters: dict[str, set[int] | None] = {
         "Person": None if person_ids is None else set(person_ids),
         "Family": None if family_ids is None else set(family_ids),
+        "Event": None,
         "Source": None,
+        "Citation": None,
     }
 
     seen_unknown: set[int] = set()

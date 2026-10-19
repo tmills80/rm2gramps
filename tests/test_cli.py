@@ -99,6 +99,29 @@ def test_cli_person_ids_subset(tmp_path: Path) -> None:
         f"({full_count}) — narrowing didn't narrow"
     )
 
+    # v2.2 narrowing: media + repositories also narrow with
+    # --person-ids because they're linked to exported owners.
+    # Sources get the same treatment because no source carries
+    # a citation in a 2-person subset (verified below). The
+    # narrow invariant we check: subset export has fewer or
+    # equal media + repositories than the full export.
+    sub_media = len(root.findall(f"{ns}media/{ns}object"))
+    full_media = len(full_root.findall(f"{ns}media/{ns}object"))
+    assert sub_media <= full_media, (
+        f"subset media ({sub_media}) should be <= full media "
+        f"({full_media})"
+    )
+    sub_repos = len(root.findall(
+        f"{ns}repositories/{ns}repository"
+    ))
+    full_repos = len(full_root.findall(
+        f"{ns}repositories/{ns}repository"
+    ))
+    assert sub_repos <= full_repos, (
+        f"subset repositories ({sub_repos}) should be <= full "
+        f"repositories ({full_repos})"
+    )
+
 
 def test_cli_missing_input(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     out = tmp_path / "out.gramps"

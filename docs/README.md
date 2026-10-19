@@ -13,28 +13,50 @@ fact-type vocabulary, full citation detail, multimedia links, and
 the full place hierarchy. This tool goes directly from `.rmtree` to
 `.gramps` and preserves all of that.
 
-## Status: v2.1
+## Status: v2.2
 
-v2.1 emits the core four (people, events, families, places) **plus
-citations and sources**. Citations are narrowed to ones referenced
-by exported owners — no dangling citations. Sources are exported
-unconditionally (a researcher may have books in the library not
-yet cited), but only those whose citations are referenced
-contribute `<citation>` elements.
+v2.2 ships all nine Gramps object types that `.gramps` supports:
+people, events, families, places (v1); citations, sources (v2.1);
+notes, media, repositories (v2.2).
 
-Citation `<sourceref>` always resolves; `<citationref>` always
-resolves; Gramps can import without errors. The
-`CitationLinkTable` `OwnerType` 0/1/2 buckets are wired
-(Person / Family / Source); unknown values (7, 19, anything else)
-are warned once and skipped — RM-internal extensions whose target
-owner type is not enumerable from the link row alone.
+v2.2 additions:
+- **Notes:** inline `Note TEXT` columns on Person / Event /
+  Family / Place become one `<note>` per unique text (sha256
+  dedup). Sources and Citations use `Comments` for the same
+  field. Notes are referenced via `<noteref hlink="_g_n<N>"/>` on
+  every owner that carries them.
+- **Media:** `<object>` elements for media referenced by
+  exported Person / Source / Citation / Event via `MediaLinkTable`.
+  Thumbnail BLOBs dropped (Gramps re-extracts on import from the
+  source file). `<mediaref>` on the four owner types.
+- **Repositories:** `<repository>` elements for AddressTable rows
+  linked to exported citations via `AddressLinkTable.OwnerType=3`.
+  `<reporef>` on citations only. `AddressType` ignored — every
+  address linked to a citation is a repository by convention.
 
-`<confidence>2</confidence>` is hard-coded (RM has no direct
-equivalent — `CitationLinkTable.Quality` is text, not int).
-`<sformat>book</sformat>` is hard-coded on every source
-(SourceTemplate mapping deferred — RM proprietary).
+`--person-ids` narrows **everything** transitively: citations,
+sources (when their citations drop), media, repositories, notes.
 
-Notes, media, and repositories remain deferred to v2.2.
+Gramps import invariants enforced by the round-trip test:
+- Every `<citationref>` / `<noteref>` / `<mediaref>` / `<reporef>`
+  resolves to a real target.
+- Every `<note>` / `<citation>` has at least one referencing
+  owner (no dangling).
+
+Known v2.2 limitations:
+- Inline notes use plain `<text>` only (no styling); v3 will
+  lift to `<styledtext>`.
+- MediaType → MIME is hard-coded for 4 common types; others
+  fall back to `application/octet-stream`.
+- `<confidence>2</confidence>` and `<sformat>book</sformat>` are
+  hard-coded (no direct RM equivalents).
+- Unknown OwnerType values in `CitationLinkTable` /
+  `MediaLinkTable` are warned once and skipped.
+
+Notes, media, and repositories from v2.2 land the rest of the
+plan-locked deferred slice. Any further work is v3+ (note
+styling, source templates, RM-internal OwnerType extensions,
+etc.).
 
 ## Install
 
@@ -108,9 +130,9 @@ the same second are byte-equal).
 | Place | `_g_p<PlaceID>` | `P0001`, `P0002`, … |
 | Source | `_g_s<SourceID>` | `S0001`, `S0002`, … | (v2.1)
 | Citation | `_g_c<CitationID>` | `C0001`, `C0002`, … | (v2.1)
-| Note | `_g_n<NoteID>` (planned) | `N0001`, … | (v2.2)
-| Media | `_g_o<MediaID>` (planned) | `O0001`, … | (v2.2)
-| Repository | `_g_r<AddressID>` (planned) | `R0001`, … | (v2.2)
+| Note | `_g_n<note_id>` (synthesised) | `N0001`, `N0002`, … | (v2.2)
+| Media | `_g_o<MediaID>` | `O0001`, `O0002`, … | (v2.2)
+| Repository | `_g_r<AddressID>` | `R0001`, `R0002`, … | (v2.2)
 
 Mirrors the format Gramps itself emits. The display id `I0001` is
 **not stable across databases** — the RM `PersonID` it derives from

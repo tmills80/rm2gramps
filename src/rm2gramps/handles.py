@@ -47,6 +47,21 @@ def citation_handle(citation_id: int) -> str:
     return f"_g_c{citation_id}"
 
 
+def note_handle(note_id: int) -> str:
+    """Derive a Gramps handle from a synthesised NoteID. (v2.2)"""
+    return f"_g_n{note_id}"
+
+
+def media_handle(media_id: int) -> str:
+    """Derive a Gramps handle from a MultimediaTable.MediaID. (v2.2)"""
+    return f"_g_o{media_id}"
+
+
+def repository_handle(address_id: int) -> str:
+    """Derive a Gramps handle from an AddressTable.AddressID. (v2.2)"""
+    return f"_g_r{address_id}"
+
+
 def format_display_id(numeric_id: int, prefix: str) -> str:
     """Format a Gramps display id like ``I0001`` / ``E0123``."""
     return f"{prefix}{numeric_id:04d}"

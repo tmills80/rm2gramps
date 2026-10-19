@@ -9,8 +9,11 @@ from rm2gramps.handles import (
     event_handle,
     family_handle,
     format_display_id,
+    media_handle,
+    note_handle,
     person_handle,
     place_handle,
+    repository_handle,
     source_handle,
 )
 
@@ -48,3 +51,21 @@ def test_citation_handle_from_id() -> None:
 def test_display_id_format_s_and_c() -> None:
     assert format_display_id(1, "S") == "S0001"
     assert format_display_id(42, "C") == "C0042"
+
+
+def test_note_handle_from_id() -> None:
+    assert note_handle(7) == "_g_n7"
+
+
+def test_media_handle_from_id() -> None:
+    assert media_handle(3) == "_g_o3"
+
+
+def test_repository_handle_from_id() -> None:
+    assert repository_handle(1) == "_g_r1"
+
+
+def test_display_id_format_n_o_r() -> None:
+    assert format_display_id(1, "N") == "N0001"
+    assert format_display_id(1, "O") == "O0001"
+    assert format_display_id(1, "R") == "R0001"

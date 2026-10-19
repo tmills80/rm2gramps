@@ -47,6 +47,7 @@ def write_database(
     sources: Sequence[str] = (),
     citations: Sequence[str] = (),
     places: Sequence[str],
+    notes: Sequence[str] = (),
 ) -> bytes:
     """Render the full Gramps XML document as UTF-8 bytes.
 
@@ -56,11 +57,12 @@ def write_database(
         ISO date (``YYYY-MM-DD``) for ``<created date=\"…\">``.
     version
         Free-form version string for ``<created version=\"…\">``.
-    events, people, families, sources, citations, places
+    events, people, families, sources, citations, places, notes
         Tuples of pre-rendered element strings (one per object) as
         produced by the v1 renderers (``events.render_event_xml``
-        etc.) and v2.1 (``sources.render_source_xml``,
-        ``citations.render_citation_xml``).
+        etc.), v2.1 (``sources.render_source_xml``,
+        ``citations.render_citation_xml``), and v2.2
+        (``notes.render_note_xml``).
     """
     parts: list[str] = [
         '<?xml version="1.0" encoding="UTF-8"?>\n',
@@ -74,9 +76,10 @@ def write_database(
 
     # Section order matches Gramps' own export convention (verified
     # against ``example.gramps``): events → people → families →
-    # sources → citations → places. Citations go after sources
-    # because the DTD requires citations to reference existing
-    # sources.
+    # sources → citations → places → notes. Notes are last
+    # because they're leaf objects referenced from many places
+    # via <noteref>; the export reads top-down and leaf objects go
+    # at the bottom.
     sections: list[tuple[str, Sequence[str]]] = [
         ("events", events),
         ("people", people),
@@ -84,6 +87,7 @@ def write_database(
         ("sources", sources),
         ("citations", citations),
         ("places", places),
+        ("notes", notes),
     ]
     for name, items in sections:
         parts.append(f"  <{name}>\n")

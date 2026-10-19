@@ -138,6 +138,36 @@ def test_writer_round_trip_against_sample_tree() -> None:
                 f"source {sr.get('hlink')}"
             )
 
+    # v2.2 invariants: every <noteref> resolves to a real <note>,
+    # every <note> has at least one <noteref> (no dangling notes).
+    notes = root.findall(f"{{{GRAMPS_NS}}}notes/{{{GRAMPS_NS}}}note")
+    if notes:
+        note_handles = {n.get("handle") for n in notes}
+        for owner in (*people, *families, *sources, *events, *places, *citations):
+            for nref in owner.findall(f"{{{GRAMPS_NS}}}noteref"):
+                assert nref.get("hlink") in note_handles, (
+                    f"{owner.tag.split('}')[-1]} {owner.get('id')} "
+                    f"noteref points to missing note {nref.get('hlink')}"
+                )
+        for note in notes:
+            nrefs = note.findall(f"{{{GRAMPS_NS}}}noteref")
+            assert len(nrefs) == 0, (
+                f"note {note.get('id')} has its own <noteref> children "
+                f"— should only be referenced, never carry refs itself"
+            )
+        # Every <note> must be referenced at least once. We use the
+        # cross-reference set built above by walking every owner's
+        # <noteref> children.
+        referenced_notes: set[str] = set()
+        for owner in (*people, *families, *sources, *events, *places, *citations):
+            for nref in owner.findall(f"{{{GRAMPS_NS}}}noteref"):
+                referenced_notes.add(nref.get("hlink"))
+        for note in notes:
+            assert note.get("handle") in referenced_notes, (
+                f"note {note.get('id')} ({note.get('handle')}) is "
+                f"emitted but no owner references it — dangling note"
+            )
+
 
 def test_writer_is_deterministic_across_two_runs() -> None:
     """Two exports of the same DB produce byte-equal XML."""

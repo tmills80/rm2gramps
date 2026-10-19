@@ -50,3 +50,47 @@ def inject_citationrefs(xml: str, citation_ids: tuple[int, ...]) -> str:
     if close_idx == -1:
         return xml
     return xml[:close_idx] + refs + xml[close_idx:]
+
+
+def inject_refs(
+    xml: str,
+    *,
+    tag: str,
+    hlink_values: tuple[str, ...],
+) -> str:
+    """Insert <{tag} hlink="…"/> children before the element's closing tag.
+
+    General form of :func:`inject_citationrefs` — accepts any
+    child element name and any hlink values (full handles, not
+    integer ids). Use this for cross-references where the
+    renderer doesn't have a `_handle()` helper — for
+    citationrefs specifically, prefer :func:`inject_citationrefs`
+    which composes the handle from a CitationID.
+
+    Parameters
+    ----------
+    xml
+        The rendered element XML.
+    tag
+        The child element name to inject (e.g. ``"noteref"``,
+        ``"mediaref"``, ``"reporef"``).
+    hlink_values
+        Tuple of full Gramps handles (e.g. ``"_g_n1"``,
+        ``"_g_o2"``, ``"_g_r3"``). Empty tuple returns ``xml``
+        unchanged.
+
+    Returns
+    -------
+    str
+        The XML with ``<{tag} hlink="…"/>`` children inserted
+        just before the element's closing tag.
+    """
+    if not hlink_values:
+        return xml
+    refs = "".join(
+        f'<{tag} hlink="{h}"/>' for h in hlink_values
+    )
+    close_idx = xml.rfind("</")
+    if close_idx == -1:
+        return xml
+    return xml[:close_idx] + refs + xml[close_idx:]

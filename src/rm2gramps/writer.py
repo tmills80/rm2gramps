@@ -26,9 +26,12 @@ from rmread import open_database as _rmread_open
 from .citations import CitationRecord, render_citation_xml
 from .citations_walk import walk_citation_links
 from .citationrefs import inject_citationrefs as _inject_citationrefs
+from .citationrefs import inject_refs as _inject_refs
 from .events import EventRecord, render_event_xml
 from .families import ChildRef, FamilyRecord, render_family_xml
-from .handles import citation_handle, source_handle
+from .handles import citation_handle, note_handle, source_handle
+from .notes import render_note_xml
+from .notes_dedup import load_notes, note_ids_for_texts
 from .people import NameRecord, PersonRecord, render_person_xml
 from .places import PlaceRecord, render_place_xml
 from .sources import SourceRecord, render_source_xml
@@ -538,8 +541,9 @@ def export_database(
         # collect tuples of strings for write_database.
         ts = change_ts if change_ts is not None else _now_ts()
 
-        place_strs = tuple(
-            render_place_xml(p, change=ts) for p in load_places(db.con)
+        places = load_places(db.con)
+        place_strs_pre: tuple[str, ...] = tuple(
+            render_place_xml(p, change=ts) for p in places
         )
 
         events = load_events(
@@ -647,6 +651,122 @@ def export_database(
 
         header_date = _dt.date.today().isoformat()
 
+        # v2.2: notes + noteref cross-references. We run the dedup
+        # loader once for the entire DB, then batch-fetch each
+        # owner's note texts and resolve to note_ids for injection.
+        # The id-set scoping on load_notes is critical: notes from
+        # non-exported owners would be emitted without any
+        # <noteref> referencing them, producing dangling notes
+        # that break Gramps' import invariants.
+        people_id_set = {p.person_id for p in people}
+        event_id_set = {e.event_id for e in events}
+        family_id_set_in = {f.family_id for f in families}
+        source_id_set = {s.source_id for s in sources}
+        place_id_set = {p.place_id for p in places}
+        citation_id_set = {c.citation_id for c in citations}
+
+        notes_by_id, hash_to_id = load_notes(
+            db.con,
+            people_ids=people_id_set,
+            event_ids=event_id_set,
+            family_ids=family_id_set_in,
+            source_ids=source_id_set,
+            place_ids=place_id_set,
+            citation_ids=citation_id_set,
+        )
+        note_strs: tuple[str, ...] = tuple(
+            render_note_xml(note, change=ts)
+            for note in sorted(notes_by_id.values(), key=lambda n: n.note_id)
+        )
+
+        # Pre-fetch note texts per owner type so we can resolve
+        # them to note_ids. One SELECT per owner type, batched.
+        note_texts_by_owner = _load_note_texts_by_owner(
+            db.con,
+            people_ids={p.person_id for p in people},
+            event_ids={e.event_id for e in events},
+            family_ids={f.family_id for f in families},
+            source_ids={s.source_id for s in sources},
+            citation_ids=(
+                {c.citation_id for c in citations}
+                if citations else set()
+                # citations list is post-walker; fall back to full
+                # table when walker returned nothing (no owners
+                # exported). For the v2.1 path this branch never
+                # runs — citations is always non-empty after the
+        # walker. Defensive only.
+            ),
+            place_ids={p.place_id for p in places},
+        )
+
+        # Build owner → note_ids map once. The renderers already
+        # ran; we just need ids keyed by owner type / id.
+        # Reuse: a single helper that injects any ref-kind into an
+        # owner element. Saves repeating the same 11-element
+        # pattern across the v1 / v2.1 / v2.2 cross-references.
+
+        def _attach(
+            xml: str,
+            ref_tag: str,
+            handle_values: tuple[str, ...],
+        ) -> str:
+            """Inject <{ref_tag} hlink="…"/> before closing tag.
+
+            Same effect as ``_inject_refs`` but with a friendlier
+            name for the writer context.
+            """
+            return _inject_refs(
+                xml, tag=ref_tag, hlink_values=handle_values,
+            )
+
+        def _noteref_for_owner(
+            owner_type: str,
+            owner_id: int,
+        ) -> tuple[str, ...]:
+            nids = note_ids_for_texts(
+                note_texts_by_owner.get(owner_type, {}).get(owner_id, []),
+                hash_to_id,
+            )
+            return tuple(note_handle(nid) for nid in nids)
+
+        def _citationref_for_owner(
+            owner_type: str,
+            owner_id: int,
+        ) -> tuple[str, ...]:
+            return tuple(
+                citation_handle(cid)
+                for cid in citation_links.get(owner_type, {}).get(owner_id, ())
+            )
+
+        # Apply <noteref> + <citationref> injection across owners.
+        people_strs = [
+            _attach(xml, "noteref", _noteref_for_owner("Person", p.person_id))
+            for xml, p in zip(people_strs_pre, people)
+        ]
+        family_strs = [
+            _attach(xml, "noteref", _noteref_for_owner("Family", f.family_id))
+            for xml, f in zip(family_strs_pre, families)
+        ]
+        source_strs = [
+            _attach(xml, "noteref", _noteref_for_owner("Source", s.source_id))
+            for xml, s in zip(source_strs_pre, sources)
+        ]
+        place_strs = [
+            _attach(xml, "noteref", _noteref_for_owner("Place", p.place_id))
+            for xml, p in zip(place_strs_pre, places)
+        ]
+        event_strs = [
+            _attach(xml, "noteref", _noteref_for_owner("Event", e.event_id))
+            for xml, e in zip(event_strs, events)
+        ]
+        citation_strs = [
+            _attach(
+                xml, "noteref",
+                _noteref_for_owner("Citation", c.citation_id),
+            )
+            for xml, c in zip(citation_strs, citations)
+        ]
+
         return write_database(
             header_date=header_date,
             version="rm2gramps/0.0.1",
@@ -656,6 +776,62 @@ def export_database(
             sources=tuple(source_strs),
             citations=tuple(citation_strs),
             places=place_strs,
+            notes=note_strs,
         )
     finally:
         db.close()
+
+
+def _load_note_texts_by_owner(
+    con: sqlite3.Connection,
+    *,
+    people_ids: set[int],
+    event_ids: set[int],
+    family_ids: set[int],
+    source_ids: set[int],
+    citation_ids: set[int],
+    place_ids: set[int],
+) -> dict[str, dict[int, list[str]]]:
+    """Bulk-fetch ``{owner_id: [note_text]}`` for each owner type.
+
+    Five batched SELECTs; the result maps ``owner_type_key`` (e.g.
+    ``"Person"``) → ``{owner_id: [text, ...]}``. Missing owners
+    get no entry in their type's dict (caller treats that as
+    "no notes").
+    """
+    out: dict[str, dict[int, list[str]]] = {
+        "Person": {}, "Event": {}, "Family": {}, "Source": {},
+        "Citation": {}, "Place": {},
+    }
+
+    def _bulk(table: str, id_col: str, note_col: str,
+              ids: set[int], key: str) -> None:
+        if not ids:
+            return
+        placeholders = ",".join("?" for _ in ids)
+        rows = con.execute(
+            f"SELECT {id_col}, {note_col} FROM {table} "
+            f"WHERE {id_col} IN ({placeholders}) AND {note_col} IS NOT NULL",
+            list(ids),
+        ).fetchall()
+        for r in rows:
+            text = r[note_col] or ""
+            if not text.strip():
+                continue
+            out[key].setdefault(r[id_col], []).append(text)
+
+    _bulk("PersonTable", "PersonID", "Note", people_ids, "Person")
+    _bulk("EventTable", "EventID", "Note", event_ids, "Event")
+    _bulk("FamilyTable", "FamilyID", "Note", family_ids, "Family")
+    # SourceTable and CitationTable have no `Note` column — the
+    # free-form text column on those tables is `Comments`. Per
+    # ``tools/rmread/docs/rm11-schema.md`` § "SourceTable" and
+    # "CitationTable" verified against SampleTree.rmtree.
+    _bulk("SourceTable", "SourceID", "Comments", source_ids, "Source")
+    _bulk("CitationTable", "CitationID", "Comments",
+           citation_ids, "Citation")
+    # PlaceTable.Note exists in the schema doc and is included so
+    # researchers can attach free-form notes to a place (common
+    # for things like "this church was demolished in 1972").
+    _bulk("PlaceTable", "PlaceID", "Note", place_ids, "Place")
+    return out

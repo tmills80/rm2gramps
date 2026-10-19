@@ -54,7 +54,6 @@ def inject_citationrefs(xml: str, citation_ids: tuple[int, ...]) -> str:
 
 def inject_refs(
     xml: str,
-    *,
     tag: str,
     hlink_values: tuple[str, ...],
 ) -> str:
@@ -66,6 +65,10 @@ def inject_refs(
     renderer doesn't have a `_handle()` helper — for
     citationrefs specifically, prefer :func:`inject_citationrefs`
     which composes the handle from a CitationID.
+
+    ``tag`` and ``hlink_values`` are positional rather than
+    keyword-only so call sites can read as
+    ``inject_refs(xml, "noteref", handles)``.
 
     Parameters
     ----------

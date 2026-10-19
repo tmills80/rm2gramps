@@ -120,10 +120,13 @@ A Gramps XML 1.7.2 document, gzipped by default. Section order:
 `<events>` → `<people>` → `<families>` → `<places>` (matches Gramps'
 own export convention).
 
-Every export is byte-deterministic for a given `.rmtree` (the
-`change` attribute uses a stable value when called programmatically,
-or `datetime.now()` when called from the CLI — two CLI runs within
-the same second are byte-equal).
+Every export is byte-deterministic for a given `.rmtree` **when
+`change_ts` is fixed**. `export_database(..., change_ts=N)` embeds `N`
+in every `change="…"` attribute and is reproducible across any time
+interval; omit it and the value is `datetime.now()`, so two runs a
+minute apart differ (matching Gramps' own behaviour). The `rm2gramps`
+CLI does not pass `change_ts`, so CLI output is not byte-reproducible
+unless you script the library call.
 
 ## Identity
 

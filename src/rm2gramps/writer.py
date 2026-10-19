@@ -26,7 +26,11 @@ from rmread import open_database as _rmread_open
 from .citations import CitationRecord, render_citation_xml
 from .citations_walk import walk_citation_links
 from .citationrefs import inject_citationrefs as _inject_citationrefs
-from .citationrefs import inject_refs as _inject_refs
+
+# Read as `_attach(xml, "noteref", handles)` at the call sites below.
+# _inject_refs takes keyword args for tag and hlink_values; the local
+# alias keeps those call sites to one positional line each.
+from .citationrefs import inject_refs as _attach
 from .events import EventRecord, render_event_xml
 from .families import ChildRef, FamilyRecord, render_family_xml
 from .handles import (
@@ -46,11 +50,12 @@ from .sources import SourceRecord, render_source_xml
 from .xml import write_database
 
 
-# RM change attribute: Unix-seconds timestamp at write time. Using a
-# stable value here would also be deterministic; using "now" is what
-# Gramps itself does. Tests asserting byte-equality of two exports
-# are still green because the value is computed once per export
-# call and the two calls happen in the same second on a CI box.
+# RM change attribute: Unix-seconds timestamp at write time. Using
+# "now" is what Gramps itself does. Note that "computed once per export
+# call" is NOT what makes two exports byte-equal — two calls a minute
+# apart differ. export_database takes change_ts for callers that need
+# reproducibility; pass a fixed value and the output is deterministic
+# across any interval.
 def _now_ts() -> int:
     return int(_dt.datetime.now(_dt.timezone.utc).timestamp())
 
@@ -889,20 +894,6 @@ def export_database(
                 continue
             repo_by_citation.setdefault(r["OwnerID"], []).append(
                 r["AddressID"]
-            )
-
-        def _attach(
-            xml: str,
-            ref_tag: str,
-            handle_values: tuple[str, ...],
-        ) -> str:
-            """Inject <{ref_tag} hlink="…"/> before closing tag.
-
-            Same effect as ``_inject_refs`` but with a friendlier
-            name for the writer context.
-            """
-            return _inject_refs(
-                xml, tag=ref_tag, hlink_values=handle_values,
             )
 
         def _noteref_for_owner(

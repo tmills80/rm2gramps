@@ -24,6 +24,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .handles import (
+    event_handle,
+    family_handle,
+    format_display_id,
+    person_handle,
+)
+
 
 @dataclass(frozen=True)
 class ChildRef:
@@ -68,13 +75,6 @@ def render_family_xml(rec: FamilyRecord, *, change: int) -> str:
     change
         Unix-seconds timestamp for the ``change`` attribute.
     """
-    from .handles import (
-        event_handle,
-        family_handle,
-        format_display_id,
-        person_handle,
-    )
-
     parts: list[str] = [
         f'<family handle="{family_handle(rec.family_id)}" '
         f'change="{int(change)}" '

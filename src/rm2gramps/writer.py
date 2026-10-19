@@ -308,6 +308,11 @@ def load_people(
     """Return PersonRecord rows.
 
     If ``person_ids`` is supplied, only those persons are loaded.
+
+    Every per-person lookup (primary name, alt names, event refs,
+    parent families, child families) is batched into one query scoped
+    to the whole export rather than run once per person. Five queries
+    per person meant 2146 statements for SampleTree's 429 people.
     """
     if person_ids is not None and not person_ids:
         return []
@@ -331,60 +336,67 @@ def load_people(
             list(person_ids),
         ).fetchall()
 
+    pids = [r["PersonID"] for r in person_rows]
+    if not pids:
+        return []
+
+    scope = ",".join("?" for _ in pids)
+    names_by_pid = _load_names_for_people(con, pids, scope)
+    event_refs_by_pid = _load_event_refs_for_people(con, pids, scope)
+    parent_fams_by_pid = _load_parent_families_for_people(con, pids, scope)
+    child_fams_by_pid = _load_child_families_for_people(con, pids, scope)
+
     out: list[PersonRecord] = []
     for pr in person_rows:
         pid = pr["PersonID"]
-        primary = _load_primary_name(con, pid)
-        alts = _load_alt_names(con, pid)
-        event_refs = _load_event_refs_for_person(con, pid)
-        parent_families = _load_parent_family_ids(con, pid)
-        child_families = _load_child_family_ids(con, pid)
+        primary, alts = names_by_pid.get(pid, (None, ()))
+        if primary is None:
+            # Person exists but has no NameType=0 row (rare in RM, but
+            # imported/unreconciled records do it). Render an empty
+            # name so <name> still emits and the handle resolves.
+            primary = NameRecord(
+                surname="", given="", prefix="", suffix="",
+                name_type=0, is_primary=True,
+            )
         out.append(PersonRecord(
             person_id=pid,
             unique_id=pr["UniqueID"] or "",
             sex=pr["Sex"] or 0,
             primary_name=primary,
             alt_names=alts,
-            event_refs=event_refs,
-            parent_families=parent_families,
-            child_families=child_families,
+            event_refs=event_refs_by_pid.get(pid, ()),
+            parent_families=parent_fams_by_pid.get(pid, ()),
+            child_families=child_fams_by_pid.get(pid, ()),
         ))
     return out
 
 
-def _load_primary_name(con: sqlite3.Connection, person_id: int) -> NameRecord:
-    row = con.execute(
-        """
-        SELECT Surname, Given, Prefix, Suffix, NameType, IsPrimary
-        FROM NameTable
-        WHERE OwnerID = ? AND NameType = 0
-        """,
-        (person_id,),
-    ).fetchone()
-    if row is None:
-        return NameRecord(surname="", given="", prefix="", suffix="")
-    return NameRecord(
-        surname=row["Surname"] or "",
-        given=row["Given"] or "",
-        prefix=row["Prefix"] or "",
-        suffix=row["Suffix"] or "",
-        name_type=row["NameType"] or 0,
-        is_primary=bool(row["IsPrimary"]),
-    )
+def _load_names_for_people(
+    con: sqlite3.Connection,
+    pids: Sequence[int],
+    scope: str,
+) -> dict[int, tuple[NameRecord | None, tuple[NameRecord, ...]]]:
+    """One query for every person's names.
 
-
-def _load_alt_names(con: sqlite3.Connection, person_id: int) -> tuple[NameRecord, ...]:
+    Returns ``{PersonID: (primary, alt_names)}``. The primary is the
+    NameType=0 row; everything else is an alt name. A person with no
+    NameType=0 row gets ``None`` as the primary so the caller can
+    substitute an empty NameRecord.
+    """
     rows = con.execute(
-        """
-        SELECT Surname, Given, Prefix, Suffix, NameType, IsPrimary
+        f"""
+        SELECT OwnerID, Surname, Given, Prefix, Suffix, NameType, IsPrimary
         FROM NameTable
-        WHERE OwnerID = ? AND NameType <> 0
-        ORDER BY NameType, SortDate
+        WHERE OwnerID IN ({scope})
+        ORDER BY OwnerID, NameType, SortDate
         """,
-        (person_id,),
+        list(pids),
     ).fetchall()
-    return tuple(
-        NameRecord(
+
+    prim: dict[int, NameRecord] = {}
+    alts: dict[int, list[NameRecord]] = {}
+    for r in rows:
+        rec = NameRecord(
             surname=r["Surname"] or "",
             given=r["Given"] or "",
             prefix=r["Prefix"] or "",
@@ -392,58 +404,83 @@ def _load_alt_names(con: sqlite3.Connection, person_id: int) -> tuple[NameRecord
             name_type=r["NameType"] or 0,
             is_primary=bool(r["IsPrimary"]),
         )
-        for r in rows
-    )
+        pid = r["OwnerID"]
+        if rec.name_type == 0:
+            prim.setdefault(pid, rec)
+        else:
+            alts.setdefault(pid, []).append(rec)
+    return {
+        pid: (prim.get(pid), tuple(alts.get(pid, ())))
+        for pid in {r["OwnerID"] for r in rows}
+    }
 
 
-def _load_event_refs_for_person(
+def _load_event_refs_for_people(
     con: sqlite3.Connection,
-    person_id: int,
-) -> tuple[tuple[int, bool], ...]:
+    pids: Sequence[int],
+    scope: str,
+) -> dict[int, tuple[tuple[int, bool], ...]]:
+    """One query for every person's Person-owned event refs."""
     rows = con.execute(
-        """
-        SELECT EventID, IsPrimary
+        f"""
+        SELECT OwnerID, EventID, IsPrimary
         FROM EventTable
-        WHERE OwnerType = 0 AND OwnerID = ?
-        ORDER BY SortDate, EventType, EventID
+        WHERE OwnerType = 0 AND OwnerID IN ({scope})
+        ORDER BY OwnerID, SortDate, EventType, EventID
         """,
-        (person_id,),
+        list(pids),
     ).fetchall()
-    return tuple((r["EventID"], bool(r["IsPrimary"])) for r in rows)
+    by_pid: dict[int, list[tuple[int, bool]]] = {}
+    for r in rows:
+        by_pid.setdefault(r["OwnerID"], []).append(
+            (r["EventID"], bool(r["IsPrimary"]))
+        )
+    return {pid: tuple(v) for pid, v in by_pid.items()}
 
 
-def _load_parent_family_ids(
+def _load_parent_families_for_people(
     con: sqlite3.Connection,
-    person_id: int,
-) -> tuple[int, ...]:
-    """Families where this person appears as Father or Mother."""
+    pids: Sequence[int],
+    scope: str,
+) -> dict[int, tuple[int, ...]]:
+    """One query: families where each person is Father or Mother."""
     rows = con.execute(
-        """
-        SELECT FamilyID
+        f"""
+        SELECT FatherID, MotherID, FamilyID
         FROM FamilyTable
-        WHERE FatherID = ? OR MotherID = ?
+        WHERE FatherID IN ({scope}) OR MotherID IN ({scope})
         ORDER BY FamilyID
         """,
-        (person_id, person_id),
+        [*pids, *pids],
     ).fetchall()
-    return tuple(r["FamilyID"] for r in rows)
+    by_pid: dict[int, set[int]] = {}
+    for r in rows:
+        for pid in (r["FatherID"], r["MotherID"]):
+            if pid:
+                by_pid.setdefault(pid, set()).add(r["FamilyID"])
+    return {pid: tuple(sorted(v)) for pid, v in by_pid.items()}
 
 
-def _load_child_family_ids(
+def _load_child_families_for_people(
     con: sqlite3.Connection,
-    person_id: int,
-) -> tuple[int, ...]:
-    """Families where this person appears as a child (ChildTable)."""
+    pids: Sequence[int],
+    scope: str,
+) -> dict[int, tuple[int, ...]]:
+    """One query: families where each person appears as a child."""
     rows = con.execute(
-        """
-        SELECT FamilyID
+        f"""
+        SELECT ChildID, FamilyID
         FROM ChildTable
-        WHERE ChildID = ?
+        WHERE ChildID IN ({scope})
         ORDER BY FamilyID
         """,
-        (person_id,),
+        list(pids),
     ).fetchall()
-    return tuple(r["FamilyID"] for r in rows)
+    by_pid: dict[int, set[int]] = {}
+    for r in rows:
+        if r["ChildID"]:
+            by_pid.setdefault(r["ChildID"], set()).add(r["FamilyID"])
+    return {pid: tuple(sorted(v)) for pid, v in by_pid.items()}
 
 
 # --- top-level ------------------------------------------------------------

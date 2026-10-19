@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import gzip
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -253,6 +254,272 @@ def test_writer_subset_person_ids() -> None:
     sub_people = sub_root.findall(f"{{{GRAMPS_NS}}}people/{{{GRAMPS_NS}}}person")
     assert len(sub_people) == 2
     assert full_count > 2
+
+
+# --- query-count guards ---------------------------------------------------
+#
+# load_people used to fire five queries per person — primary name, alt
+# names, event refs, parent families, child families — so building 429
+# people cost 2146 statements. The fix batches each of those into one
+# query for the whole export scope.
+#
+# Counting uses sqlite3's trace callback rather than a mock: the real
+# SQL really executes, and the connection is read-only so there is no
+# side effect to unwind.
+
+
+def _trace(db, fn):
+    """Run fn(db.con) with tracing on; return (result, statements)."""
+    seen: list[str] = []
+    db.con.set_trace_callback(seen.append)
+    try:
+        result = fn(db.con)
+    finally:
+        db.con.set_trace_callback(None)
+    return result, seen
+
+
+def test_load_people_query_count_is_bounded(two_ids: list[int]) -> None:
+    """Two people must not cost more statements than a full export.
+
+    Pre-fix this was 5 per person (11 for two); the batched loaders
+    run the same small number of statements for two people as for the
+    whole tree, because every lookup is scoped to the export rather
+    than to one person at a time.
+    """
+    from rmread import open_database
+    from rm2gramps.writer import load_people
+
+    db = open_database(SAMPLE_TREE)
+    try:
+        people, statements = _trace(
+            db, lambda con: load_people(con, person_ids=two_ids)
+        )
+        kinds = {" ".join(s.split())[:60] for s in statements}
+
+        assert len(people) == 2, f"expected 2 people, got {len(people)}"
+        assert len(statements) <= 8, (
+            f"load_people issued {len(statements)} statements for 2 people "
+            f"(N+1 lookup regression):\n  " + "\n  ".join(sorted(kinds))
+        )
+    finally:
+        db.close()
+
+
+def test_load_people_query_count_does_not_grow_with_people() -> None:
+    """The invariant: statement count is flat in the number of people.
+
+    Two people and every person must both fit under the same ceiling.
+    If a per-person query returns, the full-tree count grows with the
+    row count and this fails.
+    """
+    from rmread import open_database
+    from rm2gramps.writer import load_people
+
+    db = open_database(SAMPLE_TREE)
+    try:
+        all_ids = [
+            r[0] for r in db.con.execute(
+                "SELECT PersonID FROM PersonTable ORDER BY PersonID"
+            ).fetchall()
+        ]
+        small, small_stmts = _trace(
+            db, lambda con: load_people(con, person_ids=all_ids[:5])
+        )
+        big, big_stmts = _trace(db, lambda con: load_people(con))
+
+        assert len(small) == 5
+        assert len(big) > 5
+        assert len(big_stmts) <= 10, (
+            f"loading {len(big)} people cost {len(big_stmts)} statements; "
+            f"expected a small constant, so the batched loaders are not "
+            f"in effect"
+        )
+        assert len(big_stmts) <= len(small_stmts) + 2, (
+            f"statement count grew from {len(small_stmts)} (5 people) to "
+            f"{len(big_stmts)} ({len(big)} people) — per-person queries "
+            f"are back"
+        )
+    finally:
+        db.close()
+
+
+def test_load_people_batches_each_lookup(two_ids: list[int]) -> None:
+    """Each of the five per-person lookups appears at most once.
+
+    Names, event refs, parent families and child families each become a
+    single scoped query. A per-person pattern shows up as many
+    near-identical statements.
+    """
+    from rmread import open_database
+    from rm2gramps.writer import load_people
+
+    db = open_database(SAMPLE_TREE)
+    try:
+        _, statements = _trace(
+            db, lambda con: load_people(con, person_ids=two_ids)
+        )
+        by_table: dict[str, int] = {}
+        for s in statements:
+            for table in ("NameTable", "EventTable", "FamilyTable",
+                          "ChildTable", "PersonTable"):
+                if table in s:
+                    by_table[table] = by_table.get(table, 0) + 1
+                    break
+        for table, n in by_table.items():
+            assert n <= 1, (
+                f"{table} queried {n} times for 2 people — expected 1 "
+                f"(batched) query"
+            )
+    finally:
+        db.close()
+
+
+# --- synthetic coverage for what SampleTree cannot exercise ---------------
+#
+# SampleTree.rmtree has zero NameTable rows with NameType <> 0, so its
+# alt-name and missing-primary paths never run. These tests build a
+# small synthetic DB that does cover them — the case where a person has
+# alt names but no NameType=0 row at all, which is what the batched
+# name loader's `None` primary exists to handle.
+
+_OWNER_TYPE_EVENT = 1  # Birth
+
+
+@pytest.fixture()
+def synthetic_db() -> Iterator[str]:
+    import sqlite3
+    import tempfile
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".rmtree", delete=False)
+    tmp.close()
+    con = sqlite3.connect(tmp.name)
+    cur = con.cursor()
+    cur.executescript("""
+        CREATE TABLE ConfigTable (RecID INTEGER, RecType INTEGER, Title TEXT,
+                                  DataRec BLOB, UTCModDate FLOAT);
+        CREATE TABLE PersonTable (PersonID INTEGER PRIMARY KEY, UniqueID TEXT,
+                                  Sex INTEGER, Living INTEGER,
+                                  IsPrivate INTEGER);
+        CREATE TABLE NameTable (NameID INTEGER PRIMARY KEY, OwnerID INTEGER,
+                                Surname TEXT, Given TEXT, Prefix TEXT,
+                                Suffix TEXT, Nickname TEXT, NameType INTEGER,
+                                SortDate BIGINT, IsPrimary INTEGER,
+                                Sentence TEXT, BirthYear INTEGER);
+        CREATE TABLE EventTable (EventID INTEGER PRIMARY KEY,
+                                 EventType INTEGER, OwnerType INTEGER,
+                                 OwnerID INTEGER, PlaceID INTEGER, Date TEXT,
+                                 SortDate BIGINT, IsPrimary INTEGER,
+                                 Sentence TEXT, Details TEXT, Note TEXT);
+        CREATE TABLE FamilyTable (FamilyID INTEGER PRIMARY KEY,
+                                  FatherID INTEGER, MotherID INTEGER,
+                                  ChildID INTEGER);
+        CREATE TABLE ChildTable (RecID INTEGER PRIMARY KEY, ChildID INTEGER,
+                                 FamilyID INTEGER, RelFather INTEGER,
+                                 RelMother INTEGER, ChildOrder INTEGER);
+        CREATE TABLE PlaceTable (PlaceID INTEGER PRIMARY KEY, Name TEXT);
+        CREATE TABLE FactTypeTable (FactTypeID INTEGER PRIMARY KEY, Name TEXT);
+    """)
+    cur.execute(
+        "INSERT INTO ConfigTable VALUES (1, 1, '', ?, 0)",
+        (b"<Root><Version>11000</Version><STVersion>700</STVersion>"
+         b"<UniqueID>FAKE-UUID</UniqueID><RootPerson>1</RootPerson></Root>",),
+    )
+    for pid, uid, sex in ((1, "synth-1", 1), (2, "synth-2", 2), (3, "synth-3", 0)):
+        cur.execute(
+            "INSERT INTO PersonTable VALUES (?, ?, ?, 0, 0)", (pid, uid, sex)
+        )
+    # Person 1: primary + three alt names. Person 2: ONLY an alt name —
+    # no NameType=0 row, the edge case. Person 3: primary only.
+    for nid, owner, surname, given, ntype, sdate in (
+        (10, 1, "AAAAAA", "Zed", 0, 1),
+        (11, 1, "MARR-NAME", "Zed", 1, 1),
+        (12, 1, "AKA-NAME", "Zed", 2, 2),
+        (13, 1, "IMM-NAME", "Zed", 3, 3),
+        (20, 2, "ONLY-ALT", "Uma", 1, 1),
+        (30, 3, "CCCCCC", "Vic", 0, 1),
+    ):
+        cur.execute(
+            "INSERT INTO NameTable (NameID, OwnerID, Surname, Given, "
+            "NameType, SortDate, IsPrimary, Sentence) "
+            "VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
+            (nid, owner, surname, given, ntype, sdate, f"{given} {surname}"),
+        )
+    for eid, owner in ((100, 1), (101, 1), (200, 2)):
+        cur.execute(
+            "INSERT INTO EventTable (EventID, EventType, OwnerType, OwnerID,"
+            " Date, SortDate, IsPrimary, Sentence) "
+            "VALUES (?, ?, 0, ?, '1 JAN 1900', 1, 0, '')",
+            (eid, _OWNER_TYPE_EVENT, owner),
+        )
+    # Family 1: person 1 + person 3 as parents, person 2 as their child.
+    # Family 2: person 1 father, person 2 mother.
+    cur.execute("INSERT INTO FamilyTable VALUES (1, 1, 3, 0)")
+    cur.execute("INSERT INTO ChildTable VALUES (1, 2, 1, 1, 1, 1)")
+    cur.execute("INSERT INTO FamilyTable VALUES (2, 1, 2, 0)")
+    con.commit()
+    con.close()
+    yield tmp.name
+    Path(tmp.name).unlink(missing_ok=True)
+
+
+@pytest.fixture()
+def synthetic_people(synthetic_db: str) -> dict[int, object]:
+    from rm2gramps.writer import load_people
+    from rmread import open_database
+
+    db = open_database(synthetic_db)
+    try:
+        return {p.person_id: p for p in load_people(db.con)}
+    finally:
+        db.close()
+
+
+def test_load_people_attaches_alt_names(synthetic_people) -> None:
+    """Alt names are attached, ordered by NameType, primary separated."""
+    p1 = synthetic_people[1]
+    assert p1.primary_name.surname == "AAAAAA"
+    assert [a.name_type for a in p1.alt_names] == [1, 2, 3]
+    assert [a.surname for a in p1.alt_names] == [
+        "MARR-NAME", "AKA-NAME", "IMM-NAME",
+    ]
+
+
+def test_load_people_handles_missing_primary_name(synthetic_people) -> None:
+    """A person with alt names but no NameType=0 row still loads.
+
+    The batched name loader returns None for the primary in this case;
+    load_people substitutes an empty NameRecord so <name> still emits
+    and the handle resolves. Pre-batching, _load_primary_name handled
+    this by returning an empty record.
+    """
+    p2 = synthetic_people[2]
+    assert p2.primary_name.surname == ""
+    assert p2.primary_name.given == ""
+    assert len(p2.alt_names) == 1
+    assert p2.alt_names[0].surname == "ONLY-ALT"
+
+
+def test_load_people_keeps_family_links(synthetic_people) -> None:
+    """childof / parentin survive the batched family queries."""
+    p1 = synthetic_people[1]
+    assert p1.parent_families == (1, 2)
+    assert p1.child_families == ()
+
+    p2 = synthetic_people[2]
+    assert p2.child_families == (1,)
+    assert p2.parent_families == (2,)
+
+    p3 = synthetic_people[3]
+    assert p3.parent_families == (1,)
+    assert p3.child_families == ()
+
+
+def test_load_people_handles_person_with_nothing(synthetic_people) -> None:
+    """A person with no events and no child link yields empty tuples."""
+    p3 = synthetic_people[3]
+    assert p3.event_refs == ()
+    assert isinstance(p3.child_families, tuple)
 
 
 # --- narrowing invariants -----------------------------------------------

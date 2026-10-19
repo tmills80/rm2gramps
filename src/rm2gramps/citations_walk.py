@@ -55,6 +55,7 @@ def walk_citation_links(
     con: sqlite3.Connection,
     *,
     person_ids: Iterable[int] | None = None,
+    family_ids: Iterable[int] | None = None,
 ) -> CitationLinks:
     """Walk CitationLinkTable and return owner-id → citation-id tuples.
 
@@ -67,6 +68,13 @@ def walk_citation_links(
         are filtered to those whose ``OwnerID`` is in the set
         (``CitationLinkTable.OwnerID`` for OwnerType=0 is a
         PersonID).
+
+    family_ids
+        Optional FamilyID subset, applied to the ``Family`` bucket
+        the same way. A ``person_ids`` export must pass this: the
+        Family bucket is not reachable from the Person bucket, so
+        without it every citation attached to any family in the tree
+        leaks into the subset export.
 
     Returns
     -------
@@ -85,6 +93,13 @@ def walk_citation_links(
         ORDER BY OwnerType, OwnerID, SortOrder, CitationID
     """
     rows = con.execute(sql).fetchall()
+
+    # Per-bucket allow-list. None means "no filter for this bucket".
+    bucket_filters: dict[str, set[int] | None] = {
+        "Person": None if person_ids is None else set(person_ids),
+        "Family": None if family_ids is None else set(family_ids),
+        "Source": None,
+    }
 
     seen_unknown: set[int] = set()
     skipped_count = 0
@@ -105,9 +120,9 @@ def walk_citation_links(
         oid = r["OwnerID"]
         cid = r["CitationID"]
 
-        if bucket == "Person" and person_ids is not None:
-            if oid not in person_ids:
-                continue
+        allowed = bucket_filters[bucket]
+        if allowed is not None and oid not in allowed:
+            continue
 
         # Append to per-owner citation-id tuple (preserving SortOrder).
         existing = out[bucket].get(oid, ())

@@ -253,3 +253,180 @@ def test_writer_subset_person_ids() -> None:
     sub_people = sub_root.findall(f"{{{GRAMPS_NS}}}people/{{{GRAMPS_NS}}}person")
     assert len(sub_people) == 2
     assert full_count > 2
+
+
+# --- narrowing invariants -----------------------------------------------
+#
+# docs/README.md claims `--person-ids` narrows *everything*
+# transitively. These tests pin that for each object type. They use
+# strict `<` — an earlier version asserted `<=`, which passes when
+# narrowing is entirely absent (subset == full) and so hid the bug.
+#
+# Each test also checks the cross-reference invariant, because a
+# narrowed export that emits a leaf nothing references is exactly the
+# defect being fixed.
+
+
+def _section(root: ET.Element, name: str, elem: str) -> list[ET.Element]:
+    return root.findall(f"{{{GRAMPS_NS}}}{name}/{{{GRAMPS_NS}}}{elem}")
+
+
+def _handles(elements: list[ET.Element]) -> set[str]:
+    return {e.get("handle") for e in elements if e.get("handle")}
+
+
+def _all_hlinks(root: ET.Element) -> set[str]:
+    return {
+        el.get("hlink")
+        for el in root.iter()
+        if el.get("hlink") is not None
+    }
+
+
+@pytest.fixture(scope="module")
+def two_ids() -> list[int]:
+    from rmread import open_database
+
+    db = open_database(SAMPLE_TREE)
+    try:
+        return [
+            r[0] for r in db.con.execute(
+                "SELECT PersonID FROM PersonTable ORDER BY PersonID LIMIT 2"
+            ).fetchall()
+        ]
+    finally:
+        db.close()
+
+
+@pytest.fixture(scope="module")
+def full_root() -> ET.Element:
+    return ET.fromstring(export_database(SAMPLE_TREE))
+
+
+@pytest.fixture(scope="module")
+def sub_root(two_ids: list[int]) -> ET.Element:
+    return ET.fromstring(export_database(SAMPLE_TREE, person_ids=two_ids))
+
+
+def test_subset_narrows_places(full_root: ET.Element, sub_root: ET.Element) -> None:
+    """Places must narrow. Pre-fix, all 545 shipped for a 2-person subset."""
+    full = _section(full_root, "places", "placeobj")
+    sub = _section(sub_root, "places", "placeobj")
+    assert len(sub) < len(full), (
+        f"subset places ({len(sub)}) must be < full ({len(full)})"
+    )
+
+
+def test_subset_narrows_sources(full_root: ET.Element, sub_root: ET.Element) -> None:
+    """Sources must narrow. Pre-fix, all 204 shipped for any subset."""
+    full = _section(full_root, "sources", "source")
+    sub = _section(sub_root, "sources", "source")
+    assert len(sub) < len(full), (
+        f"subset sources ({len(sub)}) must be < full ({len(full)})"
+    )
+
+
+def test_subset_narrows_repositories(
+    full_root: ET.Element, sub_root: ET.Element
+) -> None:
+    """Repositories must narrow. Pre-fix, all 5 always shipped."""
+    full = _section(full_root, "repositories", "repository")
+    sub = _section(sub_root, "repositories", "repository")
+    assert len(sub) < len(full), (
+        f"subset repositories ({len(sub)}) must be < full ({len(full)})"
+    )
+
+
+def test_subset_narrows_citations(
+    full_root: ET.Element, sub_root: ET.Element
+) -> None:
+    """Citations must narrow meaningfully, not by 2 of 434."""
+    full = _section(full_root, "citations", "citation")
+    sub = _section(sub_root, "citations", "citation")
+    assert len(sub) < len(full) / 2, (
+        f"subset citations ({len(sub)}) should be well under half of "
+        f"full ({len(full)}); a near-equal count means the walker's "
+        f"Source bucket is leaking unrequested citations"
+    )
+
+
+def test_subset_narrows_media(
+    full_root: ET.Element, sub_root: ET.Element
+) -> None:
+    full = _section(full_root, "media", "object")
+    sub = _section(sub_root, "media", "object")
+    assert len(sub) < len(full), (
+        f"subset media ({len(sub)}) must be < full ({len(full)})"
+    )
+
+
+def test_subset_emits_no_unreferenced_leaves(sub_root: ET.Element) -> None:
+    """Every narrowed leaf object must be referenced by something.
+
+    Places and repositories in a narrowed export exist only to satisfy
+    a cross-reference. An unreferenced <placeobj> or <repository> is
+    dead weight the researcher did not ask for.
+    """
+    hlinks = _all_hlinks(sub_root)
+    for section, elem in (
+        ("places", "placeobj"),
+        ("repositories", "repository"),
+        ("citations", "citation"),
+        ("media", "object"),
+        ("notes", "note"),
+    ):
+        orphans = _handles(_section(sub_root, section, elem)) - hlinks
+        assert not orphans, (
+            f"{section}: {len(orphans)} unreferenced {elem} in subset "
+            f"export, e.g. {sorted(orphans)[:3]}"
+        )
+
+
+def test_empty_subset_emits_no_people() -> None:
+    """An unknown PersonID must not ship 40% of the database.
+
+    Regression: with no narrowing on sources/places/repositories,
+    ``--person-ids 999999`` emitted zero people and ~200KB of
+    citations, sources, and places.
+    """
+    root = ET.fromstring(export_database(SAMPLE_TREE, person_ids=[999999]))
+    assert _section(root, "people", "person") == []
+    # With no people, no family can reach a person either.
+    assert _section(root, "families", "family") == []
+
+
+def test_citationrefs_survive_noteref_injection(full_root: ET.Element) -> None:
+    """<citationref> must survive the later <noteref>/<mediaref> pass.
+
+    Regression: the noteref pass rebuilt people/families/sources from
+    the *_pre strings, silently discarding every <citationref>
+    injected beforehand. Person I0001 — whose only cross-reference is
+    citation _g_c3 — came out with no citationref at all.
+
+    Scope note: this only asserts that citations attached to a
+    *person* survive. The full export legitimately contains many
+    citations reachable only from their parent <source>, which is how
+    Gramps models a source's own bibliography.
+    """
+    people = _section(full_root, "people", "person")
+
+    with_citref = [p for p in people
+                   if p.find(f"{{{GRAMPS_NS}}}citationref") is not None]
+    assert with_citref, (
+        "no person carries a <citationref>; the noteref pass is "
+        "discarding the citationref injection"
+    )
+
+    # A person-attached citation must resolve to an emitted citation.
+    citation_handles = _handles(_section(full_root, "citations", "citation"))
+    person_cited = {
+        c.get("hlink")
+        for p in people
+        for c in p.findall(f"{{{GRAMPS_NS}}}citationref")
+        if c.get("hlink") is not None
+    }
+    dangling = person_cited - citation_handles
+    assert not dangling, (
+        f"{len(dangling)} citations referenced by a person are not "
+        f"emitted, e.g. {sorted(dangling)[:3]}"
+    )

@@ -101,26 +101,22 @@ def test_cli_person_ids_subset(tmp_path: Path) -> None:
 
     # v2.2 narrowing: media + repositories also narrow with
     # --person-ids because they're linked to exported owners.
-    # Sources get the same treatment because no source carries
-    # a citation in a 2-person subset (verified below). The
-    # narrow invariant we check: subset export has fewer or
-    # equal media + repositories than the full export.
-    sub_media = len(root.findall(f"{ns}media/{ns}object"))
-    full_media = len(full_root.findall(f"{ns}media/{ns}object"))
-    assert sub_media <= full_media, (
-        f"subset media ({sub_media}) should be <= full media "
-        f"({full_media})"
-    )
-    sub_repos = len(root.findall(
-        f"{ns}repositories/{ns}repository"
-    ))
-    full_repos = len(full_root.findall(
-        f"{ns}repositories/{ns}repository"
-    ))
-    assert sub_repos <= full_repos, (
-        f"subset repositories ({sub_repos}) should be <= full "
-        f"repositories ({full_repos})"
-    )
+    #
+    # Strict `<` — this previously asserted `<=`, which passes when
+    # narrowing is entirely absent (subset == full). Both were
+    # equal-by-default, so the assertion could not fail.
+    for section, elem, label in (
+        ("media", "object", "media"),
+        ("repositories", "repository", "repositories"),
+        ("sources", "source", "sources"),
+        ("places", "placeobj", "places"),
+    ):
+        sub_n = len(root.findall(f"{ns}{section}/{ns}{elem}"))
+        full_n = len(full_root.findall(f"{ns}{section}/{ns}{elem}"))
+        assert sub_n < full_n, (
+            f"subset {label} ({sub_n}) should be < full {label} "
+            f"({full_n}) — narrowing didn't narrow"
+        )
 
 
 def test_cli_missing_input(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

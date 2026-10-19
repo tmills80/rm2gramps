@@ -35,7 +35,12 @@ v2.2 additions:
   address linked to a citation is a repository by convention.
 
 `--person-ids` narrows **everything** transitively: citations,
-sources (when their citations drop), media, repositories, notes.
+sources, media, repositories, notes, places. Each object type is
+restricted to what the requested people actually reach — a place
+ships only if an exported event cites it, a source only if an
+exported citation parents under it. Exporting 3 of 429 people in
+`SampleTree.rmtree` yields ~7 KB against ~510 KB for the full
+export.
 
 Gramps import invariants enforced by the round-trip test:
 - Every `<citationref>` / `<noteref>` / `<mediaref>` / `<reporef>`

@@ -58,15 +58,40 @@ def _now_ts() -> int:
 # --- places ---------------------------------------------------------------
 
 
-def load_places(con: sqlite3.Connection) -> list[PlaceRecord]:
-    """Return distinct places, ordered by PlaceID for determinism."""
-    rows = con.execute(
-        """
-        SELECT PlaceID, Name
-        FROM PlaceTable
-        ORDER BY PlaceID
-        """
-    ).fetchall()
+def load_places(
+    con: sqlite3.Connection,
+    *,
+    keep_ids: set[int] | None = None,
+) -> list[PlaceRecord]:
+    """Return distinct places, ordered by PlaceID for determinism.
+
+    ``keep_ids`` narrows to the given PlaceIDs. Pass ``None`` for the
+    full table. A place exists in the export only to satisfy an
+    ``<place hlink>`` on an exported event, so narrowing to the
+    referenced ids keeps the subset export from carrying the whole
+    PlaceTable.
+    """
+    if keep_ids is not None and not keep_ids:
+        return []
+    if keep_ids is None:
+        rows = con.execute(
+            """
+            SELECT PlaceID, Name
+            FROM PlaceTable
+            ORDER BY PlaceID
+            """
+        ).fetchall()
+    else:
+        placeholders = ",".join("?" for _ in keep_ids)
+        rows = con.execute(
+            f"""
+            SELECT PlaceID, Name
+            FROM PlaceTable
+            WHERE PlaceID IN ({placeholders})
+            ORDER BY PlaceID
+            """,
+            list(keep_ids),
+        ).fetchall()
     return [PlaceRecord(place_id=r["PlaceID"], name=r["Name"] or "") for r in rows]
 
 
@@ -427,15 +452,39 @@ def _load_child_family_ids(
 # --- sources / citations ---------------------------------------------------
 
 
-def load_sources(con: sqlite3.Connection) -> list[SourceRecord]:
-    """Return every SourceTable row, ordered by SourceID."""
-    rows = con.execute(
-        """
-        SELECT SourceID, Name, IsPrivate, ActualText, RefNumber
-        FROM SourceTable
-        ORDER BY SourceID
-        """
-    ).fetchall()
+def load_sources(
+    con: sqlite3.Connection,
+    *,
+    keep_ids: set[int] | None = None,
+) -> list[SourceRecord]:
+    """Return SourceTable rows, ordered by SourceID.
+
+    ``keep_ids`` narrows to the given SourceIDs; ``None`` returns the
+    whole table. Callers pass the sources that an exported citation
+    actually parents under, so a subset export does not carry every
+    source in the tree.
+    """
+    if keep_ids is not None and not keep_ids:
+        return []
+    if keep_ids is None:
+        rows = con.execute(
+            """
+            SELECT SourceID, Name, IsPrivate, ActualText, RefNumber
+            FROM SourceTable
+            ORDER BY SourceID
+            """
+        ).fetchall()
+    else:
+        placeholders = ",".join("?" for _ in keep_ids)
+        rows = con.execute(
+            f"""
+            SELECT SourceID, Name, IsPrivate, ActualText, RefNumber
+            FROM SourceTable
+            WHERE SourceID IN ({placeholders})
+            ORDER BY SourceID
+            """,
+            list(keep_ids),
+        ).fetchall()
     out: list[SourceRecord] = []
     for r in rows:
         # RM does not have a single Author column on SourceTable; we
@@ -455,6 +504,7 @@ def load_citations(
     con: sqlite3.Connection,
     *,
     referenced_source_ids: set[int],
+    keep_ids: set[int] | None = None,
 ) -> list[CitationRecord]:
     """Return CitationTable rows whose SourceID is in ``referenced_source_ids``.
 
@@ -462,20 +512,42 @@ def load_citations(
     exported are returned. No dangling citations. When
     ``referenced_source_ids`` is empty (no owners), nothing is
     returned.
+
+    ``keep_ids`` further narrows to specific CitationIDs. Source-level
+    narrowing alone is too coarse on a subset export: every citation
+    under a surviving source is a sibling of the one you asked for,
+    and nothing may reference it. Pass the exact citation ids the
+    walker found to emit only those.
     """
     if not referenced_source_ids:
         return []
+    if keep_ids is not None and not keep_ids:
+        return []
     placeholders = ",".join("?" for _ in referenced_source_ids)
-    rows = con.execute(
-        f"""
-        SELECT CitationID, SourceID, RefNumber, ActualText,
-               ShortFootnote, Footnote, Bibliography
-        FROM CitationTable
-        WHERE SourceID IN ({placeholders})
-        ORDER BY CitationID
-        """,
-        list(referenced_source_ids),
-    ).fetchall()
+    if keep_ids is None:
+        rows = con.execute(
+            f"""
+            SELECT CitationID, SourceID, RefNumber, ActualText,
+                   ShortFootnote, Footnote, Bibliography
+            FROM CitationTable
+            WHERE SourceID IN ({placeholders})
+            ORDER BY CitationID
+            """,
+            list(referenced_source_ids),
+        ).fetchall()
+    else:
+        cite_placeholders = ",".join("?" for _ in keep_ids)
+        rows = con.execute(
+            f"""
+            SELECT CitationID, SourceID, RefNumber, ActualText,
+                   ShortFootnote, Footnote, Bibliography
+            FROM CitationTable
+            WHERE SourceID IN ({placeholders})
+              AND CitationID IN ({cite_placeholders})
+            ORDER BY CitationID
+            """,
+            [*referenced_source_ids, *keep_ids],
+        ).fetchall()
     out: list[CitationRecord] = []
     for r in rows:
         out.append(CitationRecord(
@@ -549,16 +621,25 @@ def export_database(
         # collect tuples of strings for write_database.
         ts = change_ts if change_ts is not None else _now_ts()
 
-        places = load_places(db.con)
-        place_strs_pre: tuple[str, ...] = tuple(
-            render_place_xml(p, change=ts) for p in places
-        )
-
         events = load_events(
             db.con,
             person_ids=person_ids,
             family_ids=family_id_set,
         )
+
+        # Places are loaded after events because the scope is derived
+        # from them: a place is in the export only if an exported
+        # event references it. Loading before events would mean
+        # emitting the whole PlaceTable on every subset export.
+        referenced_place_ids = {e.place_id for e in events if e.place_id}
+        places = load_places(
+            db.con,
+            keep_ids=None if person_ids is None else referenced_place_ids,
+        )
+        place_strs_pre: tuple[str, ...] = tuple(
+            render_place_xml(p, change=ts) for p in places
+        )
+
         # Index events by PersonID for citationref injection later.
         # An event may be attached to multiple people (rare) but
         # in RM a Person-owned event has exactly one OwnerID. We
@@ -590,36 +671,39 @@ def export_database(
         family_strs_pre: list[str] = [render_family_xml(f, change=ts) for f in families]
 
         # v2.1: sources + citations + walker.
-        sources = load_sources(db.con)
-
+        #
         # Walker reads CitationLinkTable and groups by owner type.
-        # When ``person_ids`` is supplied, only Person-bucket rows
-        # for those persons are returned; family/source citations
-        # are still returned (the families and sources themselves
-        # are exported unconditionally here — narrowing by person
-        # graph is the caller's contract).
+        # A person_ids export filters both the Person bucket (by the
+        # requested people) and the Family bucket (by the families
+        # those people belong to). The Source bucket is filtered
+        # below, once the citations it owns are known.
         person_subset = (
             set(person_ids) if person_ids is not None else None
         )
         citation_links = walk_citation_links(
-            db.con, person_ids=person_subset
+            db.con,
+            person_ids=person_subset,
+            family_ids=family_id_set,
         )
 
-        # Render sources first so we know which SourceIDs to
-        # narrow citations against.
-        source_strs_pre: list[str] = [
-            render_source_xml(s, change=ts) for s in sources
-        ]
+        # v2.1 citation narrowing: collect every citation ID referenced
+        # by an owner we are actually exporting, then ask the DB which
+        # sources those citations parent under.
+        #
+        # On a subset export the Source bucket is deliberately NOT
+        # included. A citation owned by a Source is reachable only
+        # from that source, not from any person — so honouring it
+        # would drag in every citation of every source in the tree
+        # (420 of 432 in SampleTree) for a two-person export. Those
+        # citations are re-derived below for the sources that survive
+        # narrowing.
+        buckets = ["Person", "Family", "Source"]
+        if person_ids is not None:
+            buckets = ["Person", "Family"]
 
-        # v2.1 citation narrowing: collect every citation ID
-        # referenced by any exported owner across all buckets,
-        # then ask the DB which sources those citations parent
-        # under. Sources not referenced by any citation are still
-        # emitted (rare but valid: "I have this book, I haven't
-        # cited it yet"), but they contribute no citations.
         all_citation_ids: set[int] = set()
-        for bucket in citation_links.values():
-            for cid_tuple in bucket.values():
+        for bucket in buckets:
+            for cid_tuple in citation_links[bucket].values():
                 all_citation_ids.update(cid_tuple)
 
         if all_citation_ids:
@@ -636,9 +720,23 @@ def export_database(
         citations = load_citations(
             db.con,
             referenced_source_ids=referenced_source_ids,
+            keep_ids=None if person_ids is None else all_citation_ids,
         )
         citation_strs: list[str] = [
             render_citation_xml(c, change=ts) for c in citations
+        ]
+
+        # Sources load after citations, narrowed to the ones an
+        # exported citation actually parents under. Emitting the whole
+        # SourceTable on a subset export ships ~200 sources the
+        # researcher did not ask for, and each one is a
+        # <citationref> target nothing points at.
+        sources = load_sources(
+            db.con,
+            keep_ids=None if person_ids is None else referenced_source_ids,
+        )
+        source_strs_pre: list[str] = [
+            render_source_xml(s, change=ts) for s in sources
         ]
 
         # Inject <citationref> into each owner element. The walker
@@ -796,17 +894,23 @@ def export_database(
         # Apply <noteref> + <mediaref> + <reporef> injection across
         # owner types. <noteref> → 6 owner types. <mediaref> →
         # Person / Source / Citation / Event. <reporef> → Citation.
+        #
+        # These chain from the *already-injected* lists, not from the
+        # *_pre originals. Seeding from *_pre would discard every
+        # <citationref> injected above — a person whose only
+        # cross-reference is a citation would come out referencing
+        # nothing.
         people_strs = [
             _attach(xml, "noteref", _noteref_for_owner("Person", p.person_id))
-            for xml, p in zip(people_strs_pre, people)
+            for xml, p in zip(people_strs, people)
         ]
         family_strs = [
             _attach(xml, "noteref", _noteref_for_owner("Family", f.family_id))
-            for xml, f in zip(family_strs_pre, families)
+            for xml, f in zip(family_strs, families)
         ]
         source_strs = [
             _attach(xml, "noteref", _noteref_for_owner("Source", s.source_id))
-            for xml, s in zip(source_strs_pre, sources)
+            for xml, s in zip(source_strs, sources)
         ]
         place_strs = [
             _attach(xml, "noteref", _noteref_for_owner("Place", p.place_id))

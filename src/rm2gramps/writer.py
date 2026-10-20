@@ -877,23 +877,34 @@ def export_database(
         # pattern across the v1 / v2.1 / v2.2 cross-references.
 
         # Build (OwnerType, OwnerID) tuples for media narrowing.
-        # 0=Person, 2=Source, 3=Citation, 4=Event. Family (1)
-        # excluded — SampleTree has no MediaLink rows with
-        # OwnerType=1 and Gramps <family> can carry media too.
+        # RM's OwnerType enum is shared across every *LinkTable:
+        #     0=Person  2=Event  3=Source  4=Citation
+        # (Family 1 is intentionally absent — Gramps <family> can
+        # carry media but SampleTree has no MediaLink rows with
+        # OwnerType=1.)
         media_owner_ids: set[tuple[int, int]] = set()
         for p in people:
             media_owner_ids.add((0, p.person_id))
-        for s in sources:
-            media_owner_ids.add((2, s.source_id))
-        for c in citations:
-            media_owner_ids.add((3, c.citation_id))
         for e in events:
-            media_owner_ids.add((4, e.event_id))
+            media_owner_ids.add((2, e.event_id))
+        for s in sources:
+            media_owner_ids.add((3, s.source_id))
+        for c in citations:
+            media_owner_ids.add((4, c.citation_id))
 
         # v2.2: load media + repositories.
         media_records = load_media(db.con, linked_to_owner_ids=media_owner_ids)
+        # Repositories are kept only when at least one of their
+        # AddressTable addresses is linked to an exported source.
+        # AddressLinkTable.OwnerType=3 OwnerIDs are SourceIDs, not
+        # CitationIDs (OwnerType 3 = Source in the global enum).
+        keep_source_ids = (
+            set(s.source_id for s in sources)
+            if person_ids is not None else None
+        )
         repository_records = load_repositories(
-            db.con, linked_to_citation_ids=citation_id_set,
+            db.con,
+            linked_to_source_ids=keep_source_ids or None,
         )
 
         # Build owner → media_id map for mediaref injection.
@@ -905,17 +916,22 @@ def export_database(
             key = (r["OwnerType"], r["OwnerID"])
             media_by_owner.setdefault(key, []).append(r["MediaID"])
 
-        # Build citation → repository_id map for reporef injection.
+        # Build source → repository_id map for reporef injection.
+        # AddressLinkTable OwnerType=3 references SourceIDs (verified
+        # against SampleTree: all 13 OwnerIDs are in SourceTable; the
+        # next-most complete is CitationTable at 12/13 — the missing
+        # one is SourceID 189). Pre-fix, this key was named
+        # ``repo_by_citation`` and OwnerIDs were treated as CitationIDs,
+        # producing <reporef> children with citation handles that did
+        # not exist.
         address_link_rows = db.con.execute(
             "SELECT AddressID, OwnerType, OwnerID FROM AddressLinkTable"
         ).fetchall()
-        repo_by_citation: dict[int, list[int]] = {}
+        repo_by_source: dict[int, list[int]] = {}
         for r in address_link_rows:
-            # AddressLinkTable OwnerType points at the citation
-            # (per SampleTree data; OwnerType=3 in v2.2's dev DB).
             if r["OwnerType"] != 3:
                 continue
-            repo_by_citation.setdefault(r["OwnerID"], []).append(
+            repo_by_source.setdefault(r["OwnerID"], []).append(
                 r["AddressID"]
             )
 
@@ -936,15 +952,15 @@ def export_database(
             mids = media_by_owner.get((owner_type, owner_id), [])
             return tuple(media_handle(mid) for mid in mids)
 
-        def _reporef_for_citation(
-            citation_id: int,
+        def _reporef_for_source(
+            source_id: int,
         ) -> tuple[str, ...]:
-            aids = repo_by_citation.get(citation_id, [])
+            aids = repo_by_source.get(source_id, [])
             return tuple(repository_handle(aid) for aid in aids)
 
         # Apply <noteref> + <mediaref> + <reporef> injection across
         # owner types. <noteref> → 6 owner types. <mediaref> →
-        # Person / Source / Citation / Event. <reporef> → Citation.
+        # Person / Source / Citation / Event. <reporef> → Source.
         #
         # These chain from the *already-injected* lists, not from the
         # *_pre originals. Seeding from *_pre would discard every
@@ -1010,12 +1026,12 @@ def export_database(
         ]
 
         # <reporef> on Citation only.
-        citation_strs = [
+        source_strs = [
             _attach(
                 xml, "reporef",
-                _reporef_for_citation(c.citation_id),
+                _reporef_for_source(s.source_id),
             )
-            for xml, c in zip(citation_strs, citations)
+            for xml, s in zip(source_strs, sources)
         ]
 
         return write_database(
@@ -1046,33 +1062,46 @@ def export_database(
 def load_repositories(
     con: sqlite3.Connection,
     *,
-    linked_to_citation_ids: set[int],
+    linked_to_source_ids: set[int] | None = None,
 ) -> list[RepositoryRecord]:
-    """Return AddressTable rows whose AddressID is linked to a citation we exported.
+    """Return AddressTable rows whose AddressID is linked to a Source we exported.
 
-    Decision 3 in the v2.2 plan: any address linked to a citation
-    counts as a repository, regardless of AddressType. The walk
-    is ``CitationLinkTable.OwnerType=...`` to find citations, then
-    ``AddressLinkTable.OwnerType=3`` (or any OwnerType that points
-    at a citation) to find the addresses attached to them.
+    ``linked_to_source_ids`` narrows to the given SourceIDs; ``None``
+    returns every address linked to any source. Callers pass the
+    set of SourceIDs that survived subset narrowing.
 
-    Empty ``linked_to_citation_ids`` → empty list (no dangling
-    repositories).
+    Decision 3 in the v2.2 plan: any address linked to an exported
+    source counts as a repository, regardless of AddressType. The
+    walk is ``AddressLinkTable.OwnerType=3`` (Source in the global
+    enum) to find the addresses.
     """
-    if not linked_to_citation_ids:
+    if linked_to_source_ids is not None and not linked_to_source_ids:
         return []
-    placeholders = ",".join("?" for _ in linked_to_citation_ids)
-    rows = con.execute(
-        f"""
-        SELECT DISTINCT a.AddressID, a.Name, a.Street1, a.City,
-               a.State, a.Zip, a.Country, a.Phone1, a.Email, a.URL
-        FROM AddressTable a
-        JOIN AddressLinkTable al ON al.AddressID = a.AddressID
-        WHERE al.OwnerID IN ({placeholders})
-        ORDER BY a.AddressID
-        """,
-        list(linked_to_citation_ids),
-    ).fetchall()
+    if linked_to_source_ids is None:
+        rows = con.execute(
+            """
+            SELECT DISTINCT a.AddressID, a.Name, a.Street1, a.City,
+                   a.State, a.Zip, a.Country, a.Phone1, a.Email, a.URL
+            FROM AddressTable a
+            JOIN AddressLinkTable al ON al.AddressID = a.AddressID
+            WHERE al.OwnerType = 3
+            ORDER BY a.AddressID
+            """
+        ).fetchall()
+    else:
+        placeholders = ",".join("?" for _ in linked_to_source_ids)
+        rows = con.execute(
+            f"""
+            SELECT DISTINCT a.AddressID, a.Name, a.Street1, a.City,
+                   a.State, a.Zip, a.Country, a.Phone1, a.Email, a.URL
+            FROM AddressTable a
+            JOIN AddressLinkTable al ON al.AddressID = a.AddressID
+            WHERE al.OwnerType = 3
+              AND al.OwnerID IN ({placeholders})
+            ORDER BY a.AddressID
+            """,
+            list(linked_to_source_ids),
+        ).fetchall()
     return [
         RepositoryRecord(
             address_id=r["AddressID"],

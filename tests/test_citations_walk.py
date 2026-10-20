@@ -192,7 +192,12 @@ def test_ownertype_0_is_person_and_1_is_family() -> None:
 
 
 def test_ownertype_enum_is_shared_across_link_tables() -> None:
-    """MediaLinkTable uses the same enum: 3 = Source, 4 = Citation."""
+    """MediaLinkTable uses the same enum as CitationLinkTable.
+
+    OwnerType=3 resolves to Source and OwnerType=4 to Citation in
+    MediaLinkTable — the opposite of what the writer's media_owner_ids
+    tuples assumed. Both buckets are large enough to disambiguate.
+    """
     db = open_database(SAMPLE_TREE)
     try:
         con = db.con
@@ -213,6 +218,58 @@ def test_ownertype_enum_is_shared_across_link_tables() -> None:
 
         assert ot3 <= source_ids, "MediaLinkTable OwnerType=3 is not Source"
         assert ot4 <= citation_ids, "MediaLinkTable OwnerType=4 is not Citation"
+    finally:
+        db.close()
+
+
+def test_addresslink_ownertype_3_is_source() -> None:
+    """AddressLinkTable OwnerType=3 OwnerIDs are all SourceIDs.
+
+    All 13 distinct OwnerIDs in SampleTree fall in SourceTable
+    (range 6..233). 12 of them happen to also be CitationIDs by ID
+    coincidence — that's the same overlap that breaks naive joins
+    elsewhere. There are no other owner tables where the bucket
+    is fully contained other than SourceTable.
+    """
+    db = open_database(SAMPLE_TREE)
+    try:
+        con = db.con
+        ids = {
+            r[0] for r in con.execute(
+                "SELECT DISTINCT OwnerID FROM AddressLinkTable "
+                "WHERE OwnerType = 3"
+            )
+        }
+        assert len(ids) > 5, "SampleTree should have AddressLink rows"
+
+        sets = {
+            label: {r[0] for r in con.execute(
+                f"SELECT {col} FROM {table}"
+            )}
+            for label, (table, col) in (
+                ("Person", ("PersonTable", "PersonID")),
+                ("Family", ("FamilyTable", "FamilyID")),
+                ("Source", ("SourceTable", "SourceID")),
+                ("Citation", ("CitationTable", "CitationID")),
+                ("Event", ("EventTable", "EventID")),
+            )
+        }
+
+        # All OwnerIDs are SourceIDs.
+        assert ids <= sets["Source"], (
+            f"{len(ids - sets['Source'])} of {len(ids)} AddressLink "
+            f"OwnerType=3 OwnerIDs are not SourceIDs"
+        )
+        # Source is the only table where the bucket is fully
+        # contained. Person/Family leave some ids out; Event does
+        # too. The cardinality rule that disambiguated CitationLink
+        # OT=2 doesn't apply here (the bucket is too small) so this
+        # is the strongest evidence we can extract.
+        for label in ("Person", "Family", "Citation", "Event"):
+            missing = ids - sets[label]
+            assert missing, (
+                f"AddressLink OT=3 lives entirely in {label}Table"
+            )
     finally:
         db.close()
 

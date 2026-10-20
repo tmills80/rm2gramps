@@ -697,3 +697,102 @@ def test_citationrefs_survive_noteref_injection(full_root: ET.Element) -> None:
         f"{len(dangling)} citations referenced by a person are not "
         f"emitted, e.g. {sorted(dangling)[:3]}"
     )
+
+
+# --- MediaLinkTable OwnerType -> target table ----------------------------
+#
+# SampleTree.rmtree has every MediaLinkTable bucket populated with
+# enough ids to disambiguate which table those OwnerIDs really belong
+# to. The pre-fix writer trio "(2,Source), (3,Citation), (4,Event)"
+# is the inverse of the data:
+#
+#     MediaLink OT=0 -> Person   (writer: Person, OK)
+#     MediaLink OT=2 -> Event    (writer: Source, WRONG)
+#     MediaLink OT=3 -> Source   (writer: Citation, WRONG)
+#     MediaLink OT=4 -> Citation (writer: Event, WRONG)
+#
+# These tests assert the schema-level invariant the writer broke.
+
+
+@pytest.mark.parametrize("owner_type,expected", [
+    (0, "Person"),
+    (2, "Event"),
+    (3, "Source"),
+    (4, "Citation"),
+])
+def test_medialink_ownertype_resolves_to_target_table(
+    owner_type: int, expected: str,
+) -> None:
+    """Every MediaLinkTable OwnerID must land in the right table."""
+    from rmread import open_database
+
+    db = open_database(SAMPLE_TREE)
+    try:
+        con = db.con
+        ids = {
+            r[0] for r in con.execute(
+                "SELECT DISTINCT OwnerID FROM MediaLinkTable "
+                "WHERE OwnerType = ?", (owner_type,)
+            )
+        }
+        assert len(ids) >= 2, (
+            f"SampleTree MediaLink OT={owner_type} has too few rows "
+            f"({len(ids)}) to test"
+        )
+
+        column = {
+            "Person": "PersonID", "Family": "FamilyID",
+            "Source": "SourceID", "Citation": "CitationID",
+            "Event": "EventID",
+        }[expected]
+        ok = {r[0] for r in con.execute(
+            f"SELECT {column} FROM {expected}Table"
+        )}
+        assert ids <= ok, (
+            f"MediaLinkTable OwnerType={owner_type}: "
+            f"{len(ids - ok)} of {len(ids)} OwnerIDs are not "
+            f"{expected}IDs"
+        )
+    finally:
+        db.close()
+
+
+# --- AddressLinkTable 3 is Source, not Citation --------------------------
+
+
+def test_writer_repolinks_resolve_to_sources(full_root: ET.Element) -> None:
+    """<reporef> children live on <source>, pointing at <repository>.
+
+    Pre-fix, AddressLinkTable.OwnerType=3 OwnerIDs were treated as
+    CitationIDs. That mapped Repository/Address → Citation, which
+    only makes sense if a citation "owns" a repository — but in
+    Gramps and in RM, a source has repository addresses. After the
+    fix, AddressLinkTable's OwnerType=3 IDs are SourceIDs, so
+    <reporef> goes on <source> children and points at <repository>.
+    """
+    sources = _section(full_root, "sources", "source")
+    source_handles = _handles(sources)
+    repo_handles = _handles(_section(full_root, "repositories", "repository"))
+
+    dead = []
+    for src in sources:
+        for r in src.findall(f"{{{GRAMPS_NS}}}reporef"):
+            h = r.get("hlink")
+            if not h:
+                continue
+            if h not in repo_handles:
+                dead.append((src.get("handle"), h))
+    assert not dead, (
+        f"{len(dead)} <reporef> on <source> resolve to nothing: "
+        f"{dead[:3]}"
+    )
+
+    # At least the major repository-bearing sources carry reporef.
+    # SourceID 9 is the canonical one in SampleTree — 5 sources link
+    # to AddressID=2, so at least one of them must carry it.
+    cited_source_ids = [
+        r.get("handle") for r in sources if r.findall(
+            f"{{{GRAMPS_NS}}}reporef"
+        )
+    ]
+    assert cited_source_ids, "no <source> carries a <reporef>"

@@ -25,7 +25,8 @@ from pathlib import Path
 
 from rmread import open_database
 
-from rm2gramps.citations_walk import walk_citation_links
+# rmread is the source of truth for the citation walker now.
+from rmread.linktables import walk_citation_links
 
 
 SAMPLE_TREE = Path("/home/tristan/genealogy_tools/SampleTree.rmtree")
@@ -88,6 +89,43 @@ def test_walk_respects_person_ids_subset() -> None:
     sub_total = sum(len(v) for v in sub_result["Person"].values())
     full_total = sum(len(v) for v in all_result["Person"].values())
     assert sub_total <= full_total
+
+
+def test_writer_does_not_inline_link_walks() -> None:
+    """The writer must use rmread.linktables, not inline SELECTs.
+
+    Pre-fix regressions this guards against:
+      - a duplicated MediaLinkTable SELECT with its own OwnerType
+        assumptions,
+      - an AddressLinkTable SELECT that mis-buckets OwnerIDs,
+      - a local copy of walk_citation_links with its own enum map.
+
+    The walker lookup is good enough; no further assertions about
+    the data are needed because the existing cross-reference tests
+    in test_writer.py already exercise the resulting XML.
+    """
+    import re
+    from pathlib import Path
+
+    src = Path(
+        "/home/tristan/genealogy_tools/tools/rm2gramps/src/rm2gramps/"
+        "writer.py"
+    ).read_text()
+
+    # Raw SELECTs against the link tables — the smell this test
+    # guards. Each maps the link-row to a downstream dict keyed on
+    # OwnerType or OwnerID; rmread.linktables.media_owner_map and
+    # address_owner_map produce exactly those maps.
+    assert "SELECT MediaID, OwnerType, OwnerID FROM MediaLinkTable" not in src
+    assert "SELECT AddressID, OwnerType, OwnerID FROM AddressLinkTable" not in src
+
+
+def test_writer_does_not_have_a_citations_walk_module() -> None:
+    """The legacy rm2gramps.citations_walk module is gone."""
+    import importlib.util
+
+    assert importlib.util.find_spec("rm2gramps.citations_walk") is None
+
 
 
 def test_walk_warns_on_unknown_owner_type(

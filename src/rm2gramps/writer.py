@@ -24,7 +24,11 @@ from pathlib import Path
 from rmread import open_database as _rmread_open
 
 from .citations import CitationRecord, render_citation_xml
-from .citations_walk import walk_citation_links
+from rmread.linktables import (
+    address_owner_map,
+    media_owner_map,
+    walk_citation_links,
+)
 from .citationrefs import inject_citationrefs as _inject_citationrefs
 
 # Read as `_attach(xml, "noteref", handles)` at the call sites below.
@@ -908,32 +912,11 @@ def export_database(
         )
 
         # Build owner → media_id map for mediaref injection.
-        media_link_rows = db.con.execute(
-            "SELECT MediaID, OwnerType, OwnerID FROM MediaLinkTable"
-        ).fetchall()
-        media_by_owner: dict[tuple[int, int], list[int]] = {}
-        for r in media_link_rows:
-            key = (r["OwnerType"], r["OwnerID"])
-            media_by_owner.setdefault(key, []).append(r["MediaID"])
+        media_by_owner = media_owner_map(db.con)
 
         # Build source → repository_id map for reporef injection.
-        # AddressLinkTable OwnerType=3 references SourceIDs (verified
-        # against SampleTree: all 13 OwnerIDs are in SourceTable; the
-        # next-most complete is CitationTable at 12/13 — the missing
-        # one is SourceID 189). Pre-fix, this key was named
-        # ``repo_by_citation`` and OwnerIDs were treated as CitationIDs,
-        # producing <reporef> children with citation handles that did
-        # not exist.
-        address_link_rows = db.con.execute(
-            "SELECT AddressID, OwnerType, OwnerID FROM AddressLinkTable"
-        ).fetchall()
-        repo_by_source: dict[int, list[int]] = {}
-        for r in address_link_rows:
-            if r["OwnerType"] != 3:
-                continue
-            repo_by_source.setdefault(r["OwnerID"], []).append(
-                r["AddressID"]
-            )
+        # AddressLinkTable OwnerType=3 references SourceIDs.
+        repo_by_source = address_owner_map(db.con)
 
         def _noteref_for_owner(
             owner_type: str,

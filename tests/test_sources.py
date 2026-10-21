@@ -29,9 +29,21 @@ def test_source_minimum() -> None:
     assert xml == (
         '<source handle="_g_s5" change="1700000000" id="S0005">'
         "<stitle>GRO Index</stitle>"
-        "<sformat>book</sformat>"
         "</source>"
     )
+
+
+def test_source_emits_no_sformat() -> None:
+    """<source> carries no <sformat>.
+
+    The Gramps DTD declares `<!ELEMENT source (stitle?, sauthor?,
+    spubinfo?, sabbrev?, noteref*, objref*, srcattribute*, reporef*,
+    tagref*)>` — there is no `sformat` element anywhere in the schema.
+    v2.1 emitted one hard-coded to "book"; it was invented.
+    """
+    rec = SourceRecord(source_id=5, name="GRO Index", is_private=False)
+    xml = render_source_xml(rec, change=1700000000)
+    assert "sformat" not in xml
 
 
 def test_source_private_emits_no_priv_wrapper() -> None:
@@ -62,7 +74,6 @@ def test_source_empty_name_keeps_handle_and_id() -> None:
     xml = render_source_xml(rec, change=1700000000)
     assert xml == (
         '<source handle="_g_s8" change="1700000000" id="S0008">'
-        "<sformat>book</sformat>"
         "</source>"
     )
     assert "<stitle" not in xml

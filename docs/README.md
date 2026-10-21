@@ -43,18 +43,28 @@ exported citation parents under it. Exporting 3 of 429 people in
 export.
 
 Gramps import invariants enforced by the round-trip test:
-- Every `<citationref>` / `<noteref>` / `<mediaref>` / `<reporef>`
-  resolves to a real target.
-- Every `<note>` / `<citation>` has at least one referencing
-  owner (no dangling).
+- Every `<citationref>` / `<noteref>` / `<objref>` / `<reporef>`
+  resolves to a real target (0 dangling across a full SampleTree
+  export).
+- Every `<object>` / `<note>` has at least one referencing owner.
+  **Not** true of every `<citation>` or `<source>`: RM trees contain
+  citations no owner links to (11 of 434 in SampleTree) and sources
+  whose only citation was dropped (10 of 204). Those ship unreferenced
+  — harmless for import, but don't read the count as a bug.
 
-Known v2.2 limitations:
+Known limitations:
 - Inline notes use plain `<text>` only (no styling); v3 will
   lift to `<styledtext>`.
 - MediaType → MIME is hard-coded for 4 common types; others
   fall back to `application/octet-stream`.
-- `<confidence>2</confidence>` and `<sformat>book</sformat>` are
-  hard-coded (no direct RM equivalents).
+- `<confidence>2</confidence>` is hard-coded (no direct RM
+  equivalent).
+- **Citation transcriptions are not exported.** `ActualText` /
+  `ShortFootnote` have no legal home on `<citation>` — Gramps models
+  them as a `<note>`. The export prints a count to stderr so the
+  omission is never silent; surfacing them as real notes is v3 work.
+- Repository `email` is dropped: the schema has no email child on
+  `<repository>` (`resemail` belongs to the `<researcher>` header).
 - Unknown OwnerType values in `CitationLinkTable` /
   `MediaLinkTable` are warned once and skipped.
 
@@ -178,13 +188,65 @@ runs the queries, and feeds the renderers.
 
 ## Tests
 
-51 tests, all green. Pure renderer tests need no fixture; writer
-and CLI tests use `SampleTree.rmtree` (RM 11.0, 4.6 MB) at the repo
-root.
+167 tests, all green (1 skipped — see below). Pure renderer tests
+need no fixture; writer and CLI tests use `SampleTree.rmtree` (RM
+11.0, 4.6 MB) at the repo root.
 
 ```sh
 python -m pytest tools/rm2gramps/tests/
 ```
+
+### Schema conformance (`test_schema.py`)
+
+The export is checked against Gramps' own DTD, vendored at
+`tests/data/grampsxml.dtd` (Gramps is GPL — see the license header
+in that file). `tests/grampsdtd.py` is a stdlib-only content-model
+matcher; `test_schema.py` runs the full `SampleTree` export through it
+and asserts:
+
+- no element outside the DTD's declared vocabulary
+- every element's children satisfy its declared ordered content model
+- the renderer-level rules individually (`<objects>` not `<media>`,
+  `<objref>` not `<mediaref>`, no `<sformat>`, no `<text>` on a
+  citation, `<repository>` shape, `<file description>` attribute,
+  `<database>` section order)
+
+`CHILD_ORDER` in `src/rm2gramps/schema_order.py` carries the DTD's
+per-element child sequence; a test pins that table against the vendored
+DTD so the copy cannot drift.
+
+The matcher's own correctness is pinned by `test_grampsdtd.py`, which
+runs it over a hand-built conformant document and asserts it *rejects*
+known-bad shapes. A real Gramps 6.0.8 export is used as a control when
+`tests/data/example.gramps` is present; that file is real research
+data and is **not committed**, so that one test skips by default.
+
+### v2.3 — schema conformance fix
+
+The v2.1/v2.2 output was internally consistent but **not
+schema-valid**; the test suite asserted rm2gramps' own conventions
+against itself, so it passed. Corrected against the DTD:
+
+| Was (invalid) | Now | Why |
+|---|---|---|
+| `<media>` section | `<objects>` | the DTD's `<database>` model has no `media` |
+| `<mediaref>` | `<objref>` | no `mediaref` element exists; owners declare `objref*` |
+| `<sformat>` on `<source>` | *(removed)* | no such element; `format` lives in `<name-formats>` |
+| `<raddr>/<rurl>/<rphone>/<email>` | `<address>` + `<url href>` + `<phone>` | none declared; `<repository>` is `(rname, type, address*, url*)` |
+| `<description>` on `<object>` | `<file description="…">` | `description` is a #REQUIRED *attribute* of `<file>` |
+| `<text>` on `<citation>` | *(removed)* | only legal inside `<note>` |
+| sources before citations | citations first | `<database>` declares that order |
+
+`<type>` is now required on every `<repository>` (`Library`, or `Web
+site` when the address carries a URL). RM's State maps to `<state>`,
+not `<county>`. Media rows with no usable file path emit no `<object>`
+at all, since `<file>` is mandatory inside one.
+
+Child order is no longer incidental: `schema_order.reorder_children`
+stably sorts each element's children into the DTD's sequence, because
+the order differs by element type (`<person>` wants `objref` before
+`<noteref>`; `<event>` wants it after) and the cross-reference
+injection pass could only ever append at the end.
 
 ## Schema reference
 

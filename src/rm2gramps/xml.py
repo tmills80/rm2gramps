@@ -78,23 +78,26 @@ def write_database(
         "  </header>\n",
     ]
 
-    # Section order matches Gramps' own export convention (verified
-    # against ``example.gramps``): events → people → families →
-    # sources → citations → places → repositories → media → notes.
-    # Notes / media / repositories are leaf objects referenced
-    # from many places via <noteref>/<mediaref>/<reporef>;
-    # they sit at the bottom of the document. Repositories before
-    # media before notes — coarse object types first, finer
-    # cross-references last.
+    # Section order and names come from the Gramps 1.7.2 DTD:
+    #
+    #   <!ELEMENT database (header, name-formats?, tags?, events?,
+    #     people?, families?, citations?, sources?, places?, objects?,
+    #     repositories?, notes?, dnatests?, dnamatches?, bookmarks?,
+    #     namemaps?...)>
+    #
+    # Two things this corrects relative to v2.1/v2.2: media lives in
+    # <objects> (not <media> — Gramps calls these "objects"), and
+    # citations precede sources. The earlier order emitted sources
+    # first, which a strict validating parser rejects.
     sections: list[tuple[str, Sequence[str]]] = [
         ("events", events),
         ("people", people),
         ("families", families),
-        ("sources", sources),
         ("citations", citations),
+        ("sources", sources),
         ("places", places),
+        ("objects", media),
         ("repositories", repositories),
-        ("media", media),
         ("notes", notes),
     ]
     for name, items in sections:

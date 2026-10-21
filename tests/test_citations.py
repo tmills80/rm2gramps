@@ -33,8 +33,8 @@ def test_citation_minimum() -> None:
     xml = render_citation_xml(rec, change=1700000000)
     assert xml == (
         '<citation handle="_g_c42" change="1700000000" id="C0042">'
-        '<sourceref hlink="_g_s5"/>'
         "<confidence>2</confidence>"
+        '<sourceref hlink="_g_s5"/>'
         "</citation>"
     )
 
@@ -54,9 +54,16 @@ def test_citation_with_page_from_ref_number() -> None:
     assert "<page>p. 24</page>" in xml
 
 
-def test_citation_with_actual_text() -> None:
-    """Non-empty ActualText → <text> block. Gramps convention for
-    long transcriptions (vs short <description> for snippets)."""
+def test_citation_with_actual_text_is_not_rendered() -> None:
+    """Non-empty ActualText is NOT emitted — <citation> has no <text>.
+
+    v2.1 put the transcription in `<text>`, but the DTD declares
+    `<!ELEMENT citation ((date)?, page?, confidence, noteref*, objref*,
+    srcattribute*, sourceref, tagref*)>` — `text` is not a legal child.
+    `<text>` exists only inside `<note>`, which is where Gramps models
+    a transcription. The writer warns with the count so the loss is
+    never silent (AGENTS.md § "No silent failure").
+    """
     rec = CitationRecord(
         citation_id=44,
         source_id=5,
@@ -67,20 +74,15 @@ def test_citation_with_actual_text() -> None:
         bibliography="",
     )
     xml = render_citation_xml(rec, change=1700000000)
-    assert (
-        "<text>Thomas Mills, son of John, baptised 12 JUN 1840.</text>"
-    ) in xml
+    assert "<text>" not in xml
+    assert "Thomas Mills" not in xml
 
 
-def test_citation_with_short_footnote() -> None:
-    """Non-empty ShortFootnote renders as a <text> block (v2.1).
+def test_citation_with_short_footnote_is_not_rendered() -> None:
+    """Non-empty ShortFootnote is NOT emitted either — same reason.
 
-    Gramps 1.7.2 has no separate 'short footnote' element on
-    citations; we emit ShortFootnote as <text> only when
-    ActualText is empty (otherwise <text> would carry the
-    transcription and the short footnote would be lost). v2.2
-    will lift short_footnote into a proper <noteref> once notes
-    land.
+    There is no legal citation child for it; v2.1 emitted `<text>`,
+    which the schema does not permit.
     """
     rec = CitationRecord(
         citation_id=45,
@@ -92,28 +94,25 @@ def test_citation_with_short_footnote() -> None:
         bibliography="",
     )
     xml = render_citation_xml(rec, change=1700000000)
-    assert "<text>GRO Index, vol. XVI, p. 211</text>" in xml
+    assert "<text>" not in xml
+    assert "GRO Index" not in xml
 
 
-def test_citation_short_footnote_skipped_when_actual_text_set() -> None:
-    """ShortFootnote is dropped when ActualText is also set.
-
-    Avoids double-emitting <text> — the more substantive
-    ActualText wins. v2.2 will lift short_footnote into its own
-    element.
-    """
+def test_citation_prefers_page_when_both_texts_present() -> None:
+    """Page still renders when transcriptions are present but dropped."""
     rec = CitationRecord(
         citation_id=45,
         source_id=5,
-        page="",
-        actual_text="Full transcription wins.",
-        short_footnote="Short footnote should be dropped.",
+        page="p. 211",
+        actual_text="Full transcription.",
+        short_footnote="Short footnote.",
         footnote="",
         bibliography="",
     )
     xml = render_citation_xml(rec, change=1700000000)
-    assert "<text>Full transcription wins.</text>" in xml
-    assert "Short footnote should be dropped" not in xml
+    assert "<page>p. 211</page>" in xml
+    assert "transcription" not in xml
+    assert "footnote" not in xml
 
 
 def test_citation_missing_source_emits_no_sourceref() -> None:
@@ -136,12 +135,12 @@ def test_citation_missing_source_emits_no_sourceref() -> None:
 
 
 def test_citation_xml_special_chars_escaped() -> None:
-    """Escaping applies to <text> and <page> and short_footnote body."""
+    """Escaping applies to <page> and to attribute values elsewhere."""
     rec = CitationRecord(
         citation_id=47,
         source_id=5,
         page='p. <24> & "note"',
-        actual_text="Müller & Søn <test> 'apos'",
+        actual_text="",
         short_footnote="",
         footnote="",
         bibliography="",
@@ -150,9 +149,6 @@ def test_citation_xml_special_chars_escaped() -> None:
     # ampersand escaped first so we don't double-escape the & in &lt;
     assert (
         "<page>p. &lt;24&gt; &amp; &quot;note&quot;</page>"
-    ) in xml
-    assert (
-        "<text>Müller &amp; Søn &lt;test&gt; &apos;apos&apos;</text>"
     ) in xml
 
 

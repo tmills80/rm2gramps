@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import sqlite3
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -50,6 +51,7 @@ from .notes_dedup import load_notes, note_ids_for_texts
 from .people import NameRecord, PersonRecord, render_person_xml
 from .places import PlaceRecord, render_place_xml
 from .repositories import RepositoryRecord, render_repository_xml
+from .schema_order import reorder_children
 from .sources import SourceRecord, render_source_xml
 from .xml import write_database
 
@@ -785,6 +787,22 @@ def export_database(
         citation_strs: list[str] = [
             render_citation_xml(c, change=ts) for c in citations
         ]
+        # No silent failure: AGENTS.md requires surfacing what was not
+        # exported. A citation transcription (ActualText /
+        # ShortFootnote) has no legal home on a <citation> — Gramps
+        # models it as a <note> — so it stays in RootsMagic only.
+        untranscribed = sum(
+            1 for c in citations if c.actual_text or c.short_footnote
+        )
+        if untranscribed:
+            print(
+                f"# note: {untranscribed} citation(s) carry a "
+                f"transcription (ActualText/ShortFootnote) that the "
+                f"Gramps schema has no place for on a <citation>; the "
+                f"text stayed in RootsMagic and was not exported. See "
+                f"src/rm2gramps/citations.py module docstring.",
+                file=sys.stderr,
+            )
 
         # Sources load after citations, narrowed to the ones an
         # exported citation actually parents under. Emitting the whole
@@ -928,7 +946,7 @@ def export_database(
             )
             return tuple(note_handle(nid) for nid in nids)
 
-        def _mediaref_for_owner(
+        def _objref_for_owner(
             owner_type: int,
             owner_id: int,
         ) -> tuple[str, ...]:
@@ -978,32 +996,40 @@ def export_database(
             for xml, c in zip(citation_strs, citations)
         ]
 
-        # <mediaref> on Person (0), Source (2), Citation (3), Event (4).
+        # <objref> on Person (0), Source (2), Citation (3), Event (4).
+        #
+        # The element is <objref>, not <mediaref>: the DTD declares no
+        # `mediaref`, and each owner's content model lists `objref*`
+        # in the slot a media reference belongs in. Order matters —
+        # inject_refs appends before the closing tag, so the DTD's
+        # declared child sequence (e.g. for <source>: stitle, sauthor,
+        # spubinfo, sabbrev, noteref*, objref*, srcattribute*,
+        # reporef*, tagref*) is satisfied by the order below.
         people_strs = [
             _attach(
-                xml, "mediaref",
-                _mediaref_for_owner(0, p.person_id),
+                xml, "objref",
+                _objref_for_owner(0, p.person_id),
             )
             for xml, p in zip(people_strs, people)
         ]
         source_strs = [
             _attach(
-                xml, "mediaref",
-                _mediaref_for_owner(2, s.source_id),
+                xml, "objref",
+                _objref_for_owner(2, s.source_id),
             )
             for xml, s in zip(source_strs, sources)
         ]
         citation_strs = [
             _attach(
-                xml, "mediaref",
-                _mediaref_for_owner(3, c.citation_id),
+                xml, "objref",
+                _objref_for_owner(3, c.citation_id),
             )
             for xml, c in zip(citation_strs, citations)
         ]
         event_strs = [
             _attach(
-                xml, "mediaref",
-                _mediaref_for_owner(4, e.event_id),
+                xml, "objref",
+                _objref_for_owner(4, e.event_id),
             )
             for xml, e in zip(event_strs, events)
         ]
@@ -1017,22 +1043,35 @@ def export_database(
             for xml, s in zip(source_strs, sources)
         ]
 
+        # render_media_xml returns "" for rows with no usable file
+        # path (an <object> requires a <file> child, and <file>
+        # requires a src). Filter those out so they don't land in the
+        # <objects> section as blank lines.
+        #
+        # Every element passes through reorder_children last: the
+        # injection passes above append cross-references before the
+        # closing tag, which cannot satisfy the DTD's per-element
+        # child order (e.g. <person> wants objref before noteref while
+        # <event> wants it after).
         return write_database(
             header_date=header_date,
             version="rm2gramps/0.0.1",
-            events=tuple(event_strs),
-            people=tuple(people_strs),
-            families=tuple(family_strs),
-            sources=tuple(source_strs),
-            citations=tuple(citation_strs),
-            places=place_strs,
-            notes=note_strs,
+            events=tuple(reorder_children(x) for x in event_strs),
+            people=tuple(reorder_children(x) for x in people_strs),
+            families=tuple(reorder_children(x) for x in family_strs),
+            sources=tuple(reorder_children(x) for x in source_strs),
+            citations=tuple(reorder_children(x) for x in citation_strs),
+            places=tuple(reorder_children(x) for x in place_strs),
+            notes=tuple(reorder_children(x) for x in note_strs),
             repositories=tuple(
-                render_repository_xml(r, change=ts)
+                reorder_children(render_repository_xml(r, change=ts))
                 for r in repository_records
             ),
             media=tuple(
-                render_media_xml(m, change=ts) for m in media_records
+                xml for xml in (
+                    reorder_children(render_media_xml(m, change=ts))
+                    for m in media_records
+                ) if xml
             ),
         )
     finally:

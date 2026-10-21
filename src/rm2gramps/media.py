@@ -15,9 +15,19 @@ MediaType → MIME mapping (Decision 6 in v2.2 plan):
 
 Source priority: if ``URL`` is non-empty, <file src> uses the URL
 (the original researcher's machine path is no good in the new
-environment). Otherwise <file src> uses ``MediaPath``. If both
-are empty, no <file> child is emitted — the wrapper still ships
-so <mediaref> hlinks resolve, and the researcher fills in Gramps.
+environment). Otherwise <file src> uses ``MediaPath``.
+
+``description`` is an **attribute of ``<file>``, not a child of
+``<object>``. The DTD declares
+``<!ATTLIST file (src CDATA #REQUIRED mime CDATA #REQUIRED checksum
+CDATA #IMPLIED description CDATA #REQUIRED)>`` and
+``<!ELEMENT object (file, attribute*, noteref*, date?, citationref*,
+tagref*)>`` — there is no ``<description>`` child of ``<object>``,
+and ``description`` is ``#REQUIRED`` on ``<file>``. When neither a
+URL nor a MediaPath yields a ``<file>``, no ``<object>`` is emitted
+at all, because an ``<object>`` cannot be schema-valid without its
+mandatory ``<file>`` child; the writer's ``<objref>`` injection
+already keys off objects that were emitted.
 
 Thumbnail BLOBs are dropped. Gramps re-extracts thumbnails on
 import from the file at <file src>. The original machine paths
@@ -25,9 +35,8 @@ will often be invalid post-export and that's a known limitation —
 see the v2.2 plan § "Risks".
 
 Description: when ``MediaFile`` is set but ``Description`` is
-empty, ``MediaFile`` becomes the <description> text (it's the
-best non-empty label we have). When ``Description`` is set, it
-wins.
+empty, ``MediaFile`` becomes the description text (it's the best
+non-empty label we have). When ``Description`` is set, it wins.
 """
 
 from __future__ import annotations
@@ -80,21 +89,22 @@ def render_media_xml(rec: MediaRecord, *, change: int) -> str:
     """
     handle = media_handle(rec.media_id)
     display = format_display_id(rec.media_id, "O")
-    parts = [
-        f'<object handle="{handle}" change="{int(change)}" '
-        f'id="{display}">'
-    ]
 
     # Source path: URL wins over MediaPath when both are set.
     src = rec.url or rec.media_path
-    if src:
-        mime = _MEDIA_TYPE_MIME.get(rec.media_type, "application/octet-stream")
-        parts.append(f'<file src="{xml_escape(src)}" mime="{mime}"/>')
+    if not src:
+        # <object> requires a <file> child, and <file> requires a src.
+        # Without one there is no schema-valid object to emit; the
+        # researcher re-adds the media in Gramps from the RM tree.
+        return ""
 
     # Description: explicit Description wins; fall back to MediaFile.
+    # It is a #REQUIRED attribute on <file>, so always emitted.
     desc = rec.description or rec.media_file
-    if desc:
-        parts.append(f"<description>{xml_escape(desc)}</description>")
-
-    parts.append("</object>")
-    return "".join(parts)
+    mime = _MEDIA_TYPE_MIME.get(rec.media_type, "application/octet-stream")
+    return (
+        f'<object handle="{handle}" change="{int(change)}" id="{display}">'
+        f'<file src="{xml_escape(src)}" mime="{mime}" '
+        f'description="{xml_escape(desc)}"/>'
+        f"</object>"
+    )

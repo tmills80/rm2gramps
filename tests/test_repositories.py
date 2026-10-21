@@ -41,12 +41,19 @@ def test_repository_minimum() -> None:
     assert xml == (
         '<repository handle="_g_r1" change="1700000000" id="R0001">'
         "<rname>Staines St Mary Parish</rname>"
+        "<type>Library</type>"
         "</repository>"
     )
 
 
-def test_repository_with_full_address_emits_raddr() -> None:
-    """Non-empty Street1 + City → <raddr> with <street> and <city>."""
+def test_repository_with_full_address_emits_address() -> None:
+    """Non-empty Street1 + City → <address> with <street> and <city>.
+
+    `<!ELEMENT address ((date)?, street?, locality?, city?, county?,
+    state?, country?, postal?, phone?, noteref*, citationref*)>` —
+    the DTD has no `raddr` element; the postal block is an <address>
+    child, and child order follows the declared sequence.
+    """
     rec = RepositoryRecord(
         address_id=2,
         name="Reading Room",
@@ -60,18 +67,43 @@ def test_repository_with_full_address_emits_raddr() -> None:
         url="",
     )
     xml = render_repository_xml(rec, change=1700000000)
-    # raddr block emitted with non-empty fields
-    assert "<raddr>" in xml
+    assert "<address>" in xml
     assert "<street>10 High Street</street>" in xml
     assert "<city>Reading</city>" in xml
-    assert "<county>Berkshire</county>" in xml  # Gramps uses <county>, not <state>
-    assert "<postal>RG1 1AA</postal>" in xml  # Gramps uses <postal>, not <zip>
+    # The DTD lists `state` as its own particle, so RM's State maps to
+    # <state> — the earlier mapping to <county> was wrong.
+    assert "<state>Berkshire</state>" in xml
+    assert "<county>" not in xml
+    assert "<postal>RG1 1AA</postal>" in xml
     assert "<country>UK</country>" in xml
-    assert "</raddr>" in xml
+    assert "</address>" in xml
+    # Declared order is street, city, county, state, country, postal,
+    # phone — country must precede postal here.
+    assert xml.index("<country>") < xml.index("<postal>")
+    assert "<raddr>" not in xml
+
+
+def test_repository_type_is_required_after_rname() -> None:
+    """`<repository>` requires (rname, type, …) — type is never omitted."""
+    rec = RepositoryRecord(address_id=10, name="AAAAAA")
+    xml = render_repository_xml(rec, change=1700000000)
+    assert xml.index("<rname>") < xml.index("<type>")
+    assert "<type>Library</type>" in xml
+
+
+def test_repository_type_is_web_site_when_a_url_is_present() -> None:
+    """A URL-bearing repository is a "Web site"; both are Gramps values."""
+    rec = RepositoryRecord(address_id=11, name="AAAAAA", url="https://x.invalid/")
+    assert "<type>Web site</type>" in render_repository_xml(rec, change=1)
 
 
 def test_repository_with_url_and_email() -> None:
-    """Non-empty URL → <rurl>; non-empty email → <email>."""
+    """Non-empty URL → <url href="…">; email has no home and is dropped.
+
+    `<!ATTLIST url (…, href CDATA #REQUIRED, …)>`. There is no `rurl`,
+    no `rphone`, and no top-level `<email>` in the schema — `resemail`
+    belongs to the `<researcher>` header block, not to a repository.
+    """
     rec = RepositoryRecord(
         address_id=3,
         name="British Library",
@@ -85,12 +117,15 @@ def test_repository_with_url_and_email() -> None:
         url="https://www.bl.uk",
     )
     xml = render_repository_xml(rec, change=1700000000)
-    assert "<rurl>https://www.bl.uk</rurl>" in xml
-    assert "<email>info@bl.uk</email>" in xml
+    assert 'href="https://www.bl.uk"' in xml
+    assert "<rurl>" not in xml
+    # Email is not rendered into an invented element.
+    assert "info@bl.uk" not in xml
+    assert "<email>" not in xml
 
 
 def test_repository_with_phone() -> None:
-    """Non-empty phone → <rphone> child."""
+    """Non-empty phone → <phone> inside the <address> block."""
     rec = RepositoryRecord(
         address_id=4,
         name="Society of Genealogists",
@@ -104,12 +139,12 @@ def test_repository_with_phone() -> None:
         url="",
     )
     xml = render_repository_xml(rec, change=1700000000)
-    # Gramps uses <rphone> (not <phone>) for repository phone numbers.
-    assert "<rphone>+44 20 7202 5400</rphone>" in xml
+    assert "<phone>+44 20 7202 5400</phone>" in xml
+    assert "<rphone>" not in xml
 
 
 def test_repository_empty_name_still_emits_handle() -> None:
-    """Empty Name → wrapper with handle+id, no <rname>."""
+    """Empty Name → placeholder <rname>, since rname is #REQUIRED."""
     rec = RepositoryRecord(
         address_id=5,
         name="",
@@ -125,11 +160,11 @@ def test_repository_empty_name_still_emits_handle() -> None:
     xml = render_repository_xml(rec, change=1700000000)
     assert 'handle="_g_r5"' in xml
     assert 'id="R0005"' in xml
-    assert "<rname" not in xml
+    assert "<rname>Unnamed repository</rname>" in xml
 
 
-def test_repository_partial_address_emits_raddr_with_filled_fields() -> None:
-    """Some raddr fields filled, others empty → <raddr> with only the filled ones."""
+def test_repository_partial_address_emits_address_with_filled_fields() -> None:
+    """Some address fields filled, others empty → only the filled ones."""
     rec = RepositoryRecord(
         address_id=6,
         name="Local Library",
@@ -143,10 +178,10 @@ def test_repository_partial_address_emits_raddr_with_filled_fields() -> None:
         url="",
     )
     xml = render_repository_xml(rec, change=1700000000)
-    assert "<raddr>" in xml
+    assert "<address>" in xml
     assert "<street>5 Church Lane</street>" in xml
     assert "<city" not in xml  # empty → omitted
-    assert "</raddr>" in xml
+    assert "</address>" in xml
 
 
 def test_repository_xml_special_chars_escaped() -> None:

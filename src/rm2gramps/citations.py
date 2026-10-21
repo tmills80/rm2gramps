@@ -3,15 +3,29 @@
 Pure-function renderer. Takes a :class:`CitationRecord` and returns
 the XML string for one <citation> element.
 
-Gramps 1.7.2 citation shape:
-- <sourceref hlink=\"...\"> — parent source (mandatory; we omit
-  only when SourceID=0 and log a warning at the writer layer)
-- <confidence>2</confidence> — hard-coded (RM has no equivalent)
+Gramps 1.7.2 citation shape (per the DTD):
 - <page> — from RefNumber when set
-- <text> — long transcription (ActualText) and / or pre-rendered
-  ShortFootnote. Both go here in v2.1; v2 could split into
-  <text> (ActualText) + <noteref hlink> (ShortFootnote once
-  notes land) if Gramps conventions demand it.
+- <confidence>2</confidence> — hard-coded (RM has no equivalent)
+- <sourceref hlink="…"> — parent source (mandatory; we omit
+  only when SourceID=0 and log a warning at the writer layer)
+- <noteref> / <objref> — injected later by the writer
+
+There is deliberately **no transcription child**. v2.1 put
+``ActualText`` in ``<text>``, but the DTD declares
+``<!ELEMENT citation ((daterange|datespan|dateval|datestr)?, page?,
+confidence, noteref*, objref*, srcattribute*, sourceref, tagref*)>`` —
+``text`` is not among them. ``<text>`` exists in the schema only
+inside ``<note>`` (``<!ELEMENT note (text, style*, tagref*)>``), and a
+real Gramps export never emits one on a citation. Gramps' own model
+is that a transcription is a *note* attached to the citation, which
+is where this belongs.
+
+So ``actual_text`` / ``short_footnote`` are not rendered here. They are
+not silently dropped: the writer counts how many citations carried a
+transcription and warns once per export, naming the count, so the
+researcher knows the text stayed in RootsMagic and was not exported.
+Surfacing it as a real ``<note>`` is v3 work (it needs the note
+dedup path to accept citation transcriptions as inputs).
 
 SourceFields BLOB and CitationFields BLOB are ignored (RM
 internal serialisation, not portable to Gramps XML).
@@ -60,18 +74,12 @@ def render_citation_xml(rec: CitationRecord, *, change: int) -> str:
         f'change="{int(change)}" '
         f'id="{format_display_id(rec.citation_id, "C")}">'
     ]
-    if rec.source_id:
-        parts.append(f'<sourceref hlink="{source_handle(rec.source_id)}"/>')
-    parts.append("<confidence>2</confidence>")
     if rec.page:
         parts.append(f"<page>{xml_escape(rec.page)}</page>")
-    if rec.actual_text:
-        parts.append(f"<text>{xml_escape(rec.actual_text)}</text>")
-    elif rec.short_footnote:
-        # Short_footnote falls back into <text> only when actual_text
-        # is absent — both going into <text> would double-emit the
-        # element. v2.2 (notes) will lift short_footnote into a
-        # proper <noteref>.
-        parts.append(f"<text>{xml_escape(rec.short_footnote)}</text>")
+    parts.append("<confidence>2</confidence>")
+    if rec.source_id:
+        parts.append(f'<sourceref hlink="{source_handle(rec.source_id)}"/>')
+    # No <text>: a citation transcription is not a legal child here.
+    # See the module docstring — the writer warns with the count.
     parts.append("</citation>")
     return "".join(parts)

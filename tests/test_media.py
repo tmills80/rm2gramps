@@ -34,10 +34,32 @@ def test_media_minimum() -> None:
     xml = render_media_xml(rec, change=1700000000)
     assert xml == (
         '<object handle="_g_o1" change="1700000000" id="O0001">'
-        '<file src="/Users/x/RM/scan.jpg" mime="image/jpeg"/>'
-        '<description>scan.jpg</description>'
+        '<file src="/Users/x/RM/scan.jpg" mime="image/jpeg" '
+        'description="scan.jpg"/>'
         "</object>"
     )
+
+
+def test_media_description_is_a_file_attribute_not_a_child() -> None:
+    """The label rides on <file description="…">, not a <description> child.
+
+    `<!ATTLIST file (src CDATA #REQUIRED mime CDATA #REQUIRED checksum
+    CDATA #IMPLIED description CDATA #REQUIRED)>` makes description a
+    #REQUIRED *attribute*, and `<!ELEMENT object (file, attribute*,
+    noteref*, date?, citationref*, tagref*)>` has no `description`
+    child at all.
+    """
+    rec = MediaRecord(
+        media_id=1,
+        media_file="scan.jpg",
+        media_path="/x/scan.jpg",
+        url="",
+        media_type=1,
+        description="Label",
+    )
+    xml = render_media_xml(rec, change=1700000000)
+    assert "<description>" not in xml
+    assert 'description="Label"' in xml
 
 
 def test_media_with_web_url_uses_url_as_src() -> None:
@@ -51,9 +73,10 @@ def test_media_with_web_url_uses_url_as_src() -> None:
         description="Web-hosted scan",
     )
     xml = render_media_xml(rec, change=1700000000)
-    assert '<file src="https://example.org/scan.jpg" mime="image/jpeg"/>' in xml
-    # MediaFile is empty so the description is the user-supplied one.
-    assert "<description>Web-hosted scan</description>" in xml
+    assert (
+        '<file src="https://example.org/scan.jpg" mime="image/jpeg" '
+        'description="Web-hosted scan"/>'
+    ) in xml
 
 
 def test_media_document_type_pdf() -> None:
@@ -112,8 +135,15 @@ def test_media_unknown_type_falls_back_to_octet_stream() -> None:
     assert 'mime="application/octet-stream"' in xml
 
 
-def test_media_empty_path_and_url_emits_wrapper_only() -> None:
-    """No MediaPath AND no URL → no <file> child; wrapper still emitted."""
+def test_media_empty_path_and_url_emits_nothing() -> None:
+    """No MediaPath AND no URL → no <object> at all.
+
+    `<!ELEMENT object (file, attribute*, noteref*, …)>` makes `<file>`
+    mandatory, and `<file>` requires a `src`. An <object> with no
+    <file> is schema-invalid, so the renderer emits nothing and the
+    writer's <objref> injection keys off the objects that exist. v2.2
+    emitted a wrapper-only <object> for this case; that was invalid.
+    """
     rec = MediaRecord(
         media_id=7,
         media_file="orphan.jpg",
@@ -123,13 +153,11 @@ def test_media_empty_path_and_url_emits_wrapper_only() -> None:
         description="",
     )
     xml = render_media_xml(rec, change=1700000000)
-    assert "<file" not in xml
-    assert 'id="O0007"' in xml
-    assert 'handle="_g_o7"' in xml
+    assert xml == ""
 
 
 def test_media_xml_special_chars_in_description_escaped() -> None:
-    """Escape applies to <description>."""
+    """Escape applies to the <file description="…"> attribute."""
     rec = MediaRecord(
         media_id=8,
         media_file="x.jpg",
@@ -140,8 +168,8 @@ def test_media_xml_special_chars_in_description_escaped() -> None:
     )
     xml = render_media_xml(rec, change=1700000000)
     assert (
-        "<description>Headstone of &lt;Thomas&gt; "
-        "&quot;Mills&quot; &amp; family</description>"
+        'description="Headstone of &lt;Thomas&gt; '
+        '&quot;Mills&quot; &amp; family"'
     ) in xml
 
 
@@ -159,8 +187,12 @@ def test_media_change_zero_emitted_verbatim() -> None:
     assert 'change="0"' in xml
 
 
-def test_media_no_description_emitted_when_empty() -> None:
-    """Both description and MediaFile empty → no <description> child."""
+def test_media_description_attribute_is_always_present() -> None:
+    """Both description and MediaFile empty → description="" on <file>.
+
+    `<file>`'s `description` is #REQUIRED, so an empty label is emitted
+    as an empty attribute rather than omitted.
+    """
     rec = MediaRecord(
         media_id=10,
         media_file="",
@@ -170,4 +202,5 @@ def test_media_no_description_emitted_when_empty() -> None:
         description="",
     )
     xml = render_media_xml(rec, change=1700000000)
+    assert 'description=""' in xml
     assert "<description" not in xml

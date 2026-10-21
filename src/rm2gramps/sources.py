@@ -3,13 +3,23 @@
 Pure-function renderer. Takes a :class:`SourceRecord` and returns
 the XML string for one <source> element.
 
-Gramps source fields: <stitle> (required), <sauthor> (optional),
-<sformat> (default \"book\"), <srepositorylink> (deferred to v2.2
-when Repositories land). Private sources get a <priv> wrapper in
-Gramps; v2.1 deliberately omits it (documented limitation —
-researcher marks private after import).
+Gramps source fields: <stitle> (optional in the DTD, always emitted
+when RM has a name), <sauthor> (optional), <sabbrev> (optional).
+Private sources get a <priv> wrapper in Gramps; v2.1 deliberately
+omits it (documented limitation — researcher marks private after
+import).
 
-``change`` is always emitted, including ``change=\"0\"`` for
+There is no ``<sformat>`` element in the Gramps schema. The DTD
+declares ``<!ELEMENT source (stitle?, sauthor?, spubinfo?, sabbrev?,
+noteref*, objref*, srcattribute*, reporef*, tagref*)>``; source
+*format* is modelled by the optional ``<name-formats>`` header block
+(``<!ELEMENT name-formats (format)*>``, each ``<format>`` a child of
+that block), which rm2gramps does not emit. Dropping the element
+rather than relocating it keeps the export schema-valid; the format
+information is not lost from the researcher — RM still holds it in
+SourceTable, and the omission is documented in the tool README.
+
+``change`` is always emitted, including ``change="0"`` for
 determinism, mirroring places.py / events.py.
 """
 
@@ -59,8 +69,5 @@ def render_source_xml(rec: SourceRecord, *, change: int) -> str:
         parts.append(f"<stitle>{xml_escape(rec.name)}</stitle>")
     if rec.author:
         parts.append(f"<sauthor>{xml_escape(rec.author)}</sauthor>")
-    # sformat: hard-coded to "book" — Gramps default. SourceTemplates
-    # deferred (no direct Gramps equivalent).
-    parts.append("<sformat>book</sformat>")
     parts.append("</source>")
     return "".join(parts)

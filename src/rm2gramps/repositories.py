@@ -7,19 +7,42 @@ Decision 3 in the v2.2 plan: any AddressTable row linked to an
 exported citation via AddressLinkTable counts as a repository,
 regardless of AddressType. RM's AddressType is ignored by v2.2.
 
-Gramps <repository> element shape:
-- <rname>…</rname> — the repository's name (from AddressTable.Name)
-- <raddr><street/><city/><county/><postal/><country/></raddr> —
-  postal address block. Empty fields are omitted.
-- <rurl>…</rurl> — repository URL (from AddressTable.URL)
-- <email>…</email> — repository email (from AddressTable.Email)
-- <rphone>…</rphone> — repository phone (from AddressTable.Phone1)
+Gramps <repository> element shape, per the 1.7.2 DTD::
 
-Gramps element-name quirks worth knowing:
-- \"state\" in RM maps to Gramps' <county> (UK-centric naming).
-- \"zip\" in RM maps to Gramps' <postal>.
-- repository phone uses <rphone>, not <phone> (Gramps uses
-  <phone> for the researcher block).
+    <!ELEMENT repository (rname, type, address*, url*, noteref*, tagref*)>
+    <!ELEMENT address ((daterange|datespan|dateval|datestr)?, street?,
+                       locality?, city?, county?, state?, country?,
+                       postal?, phone?, noteref*, citationref*)>
+    <!ATTLIST url (priv (0|1) #IMPLIED type CDATA #IMPLIED
+                   href CDATA #REQUIRED description CDATA #IMPLIED)>
+
+Three corrections this encodes, each verified against the DTD
+rather than assumed:
+
+- There is no ``<raddr>``, ``<rurl>``, ``<rphone>`` or top-level
+  ``<email>`` element anywhere in the schema. The postal block is an
+  ``<address>`` child; phone is a ``<phone>`` child *of that
+  address*; the web address is a ``<url>`` child carrying the link in
+  its ``href`` attribute. The email field has no home in a
+  ``<repository>`` — the DTD's ``<resemail>`` belongs to the
+  ``<researcher>`` header block, not to repositories — so it is
+  dropped rather than invented into an invalid shape.
+- ``<type>`` is **required** and follows ``<rname>``. RM's
+  AddressTable has no repository-kind column, so v2.2 infers it:
+  a row with a URL is a ``Web site``, otherwise the Gramps default
+  ``Library``. Both values are ones Gramps' own exports use.
+- "state" in RM maps to Gramps ``<state>``, not ``<county>``. The
+  earlier code mapped state→county on a "UK-centric naming"
+  assumption; the DTD lists ``state`` as its own particle, and a real
+  Gramps export uses ``<state>`` for a UK address. Postal codes go to
+  ``<postal>``.
+
+Child order inside ``<address>`` follows the DTD's declared
+sequence (street, locality, city, county, state, country, postal,
+phone) — a strict parser rejects them out of order.
+
+The writer's ``<reporef>`` injection keys off the handle this
+returns, so the display-id scheme is unchanged.
 """
 
 from __future__ import annotations
@@ -28,6 +51,17 @@ from dataclasses import dataclass
 
 from .handles import format_display_id, repository_handle
 from .xmlutil import xml_escape
+
+
+def _repository_type(*, has_url: bool) -> str:
+    """Gramps <type> for this repository.
+
+    RM's AddressTable carries no repository-kind column. A row that
+    has a URL is a web presence; anything else is a physical holding
+    institution, which is Gramps' own default (``Library``). Both
+    values appear in Gramps' own exports.
+    """
+    return "Web site" if has_url else "Library"
 
 
 @dataclass(frozen=True)
@@ -59,23 +93,26 @@ def render_repository_xml(rec: RepositoryRecord, *, change: int) -> str:
     """
     handle = repository_handle(rec.address_id)
     display = format_display_id(rec.address_id, "R")
+
+    # rname and type are both required by the DTD, and rname must come
+    # first. An unnamed row still needs an <rname> for the document to
+    # be schema-valid, so fall back to a placeholder.
+    name = rec.name or "Unnamed repository"
     parts = [
         f'<repository handle="{handle}" change="{int(change)}" '
-        f'id="{display}">'
+        f'id="{display}">',
+        f"<rname>{xml_escape(name)}</rname>",
+        f"<type>{_repository_type(has_url=bool(rec.url))}</type>",
     ]
 
-    if rec.name:
-        parts.append(f"<rname>{xml_escape(rec.name)}</rname>")
-
-    # raddr block — only emit when at least one field is filled.
-    # Gramps' controlled vocabulary: street / city / county / postal
-    # / country. State in RM maps to <county>; zip maps to <postal>.
+    # <address> — only emitted when at least one field is filled.
     addr_fields: list[tuple[str, str]] = [
         ("street", rec.street1),
         ("city", rec.city),
-        ("county", rec.state),
-        ("postal", rec.zip_code),
+        ("state", rec.state),
         ("country", rec.country),
+        ("postal", rec.zip_code),
+        ("phone", rec.phone),
     ]
     addr_block = "".join(
         f"<{tag}>{xml_escape(value)}</{tag}>"
@@ -83,14 +120,13 @@ def render_repository_xml(rec: RepositoryRecord, *, change: int) -> str:
         if value
     )
     if addr_block:
-        parts.append(f"<raddr>{addr_block}</raddr>")
+        parts.append(f"<address>{addr_block}</address>")
 
     if rec.url:
-        parts.append(f"<rurl>{xml_escape(rec.url)}</rurl>")
-    if rec.email:
-        parts.append(f"<email>{xml_escape(rec.email)}</email>")
-    if rec.phone:
-        parts.append(f"<rphone>{xml_escape(rec.phone)}</rphone>")
+        parts.append(
+            f'<url href="{xml_escape(rec.url)}" type="Web Home" '
+            f'description="{xml_escape(name)}"/>'
+        )
 
     parts.append("</repository>")
     return "".join(parts)

@@ -106,7 +106,7 @@ def test_cli_person_ids_subset(tmp_path: Path) -> None:
     # narrowing is entirely absent (subset == full). Both were
     # equal-by-default, so the assertion could not fail.
     for section, elem, label in (
-        ("media", "object", "media"),
+        ("objects", "object", "objects"),
         ("repositories", "repository", "repositories"),
         ("sources", "source", "sources"),
         ("places", "placeobj", "places"),

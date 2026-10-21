@@ -169,35 +169,62 @@ def test_writer_round_trip_against_sample_tree() -> None:
                 f"emitted but no owner references it — dangling note"
             )
 
-    # v2.2 invariants: every <mediaref> resolves to a real <object>,
+    # v2.2 invariants: every <objref> resolves to a real <object>,
     # every <reporef> resolves to a real <repository>.
-    objects = root.findall(f"{{{GRAMPS_NS}}}media/{{{GRAMPS_NS}}}object")
+    #
+    # The section is <objects> (Gramps' name for media) and the
+    # reference element is <objref> — both per the 1.7.2 DTD. This
+    # previously looked for a <media> section containing <object>,
+    # which matched nothing, so the `if objects:` guard made the whole
+    # block a no-op: it could not fail. Assert the objects are present
+    # rather than skipping the check when the fixture changes.
+    objects = root.findall(f"{{{GRAMPS_NS}}}objects/{{{GRAMPS_NS}}}object")
     repos = root.findall(
         f"{{{GRAMPS_NS}}}repositories/{{{GRAMPS_NS}}}repository"
     )
-    if objects:
-        object_handles = {o.get("handle") for o in objects}
-        for owner in (*people, *sources, *citations, *events):
-            for mref in owner.findall(f"{{{GRAMPS_NS}}}mediaref"):
-                assert mref.get("hlink") in object_handles, (
-                    f"{owner.tag.split('}')[-1]} {owner.get('id')} "
-                    f"mediaref points to missing object {mref.get('hlink')}"
-                )
-    if repos:
-        repo_handles = {r.get("handle") for r in repos}
-        for c in citations:
-            for rref in c.findall(f"{{{GRAMPS_NS}}}reporef"):
-                assert rref.get("hlink") in repo_handles, (
-                    f"citation {c.get('id')} reporef points to missing "
-                    f"repository {rref.get('hlink')}"
-                )
+    assert objects, "no <object> elements emitted"
+    object_handles = {o.get("handle") for o in objects}
+    for owner in (*people, *sources, *citations, *events):
+        for oref in owner.findall(f"{{{GRAMPS_NS}}}objref"):
+            assert oref.get("hlink") in object_handles, (
+                f"{owner.tag.split('}')[-1]} {owner.get('id')} "
+                f"objref points to missing object {oref.get('hlink')}"
+            )
+    assert repos, "no <repository> elements emitted"
+    repo_handles = {r.get("handle") for r in repos}
+    for c in (*citations, *sources):
+        for rref in c.findall(f"{{{GRAMPS_NS}}}reporef"):
+            assert rref.get("hlink") in repo_handles, (
+                f"{c.tag.split('}')[-1]} {c.get('id')} reporef points to "
+                f"missing repository {rref.get('hlink')}"
+            )
 
 
 def test_writer_is_deterministic_across_two_runs() -> None:
-    """Two exports of the same DB produce byte-equal XML."""
-    payload_a = export_database(SAMPLE_TREE)
-    payload_b = export_database(SAMPLE_TREE)
+    """Two exports of the same DB produce byte-equal XML.
+
+    `change_ts` must be pinned. Without it the writer stamps
+    `datetime.now()` into every `change="…"` attribute, so two runs
+    a second apart legitimately differ — documented in the tool README
+    ("CLI output is not byte-reproducible unless you script the
+    library call"). This test asserts the property that *is* ours to
+    guarantee: same input plus same change_ts → same bytes.
+    """
+    payload_a = export_database(SAMPLE_TREE, change_ts=1700000000)
+    payload_b = export_database(SAMPLE_TREE, change_ts=1700000000)
     assert payload_a == payload_b
+
+
+def test_pinned_change_ts_appears_in_output() -> None:
+    """The pinned timestamp is what actually lands in the document.
+
+    Without this, the determinism test above could pass for the wrong
+    reason — e.g. if change_ts were silently ignored and the attribute
+    came from somewhere else entirely.
+    """
+    payload = export_database(SAMPLE_TREE, change_ts=1700000000)
+    assert b'change="1700000000"' in payload
+    assert b'change="1700000001"' not in payload
 
 
 def test_writer_rejects_non_rmtree(tmp_path: Path) -> None:
@@ -620,10 +647,10 @@ def test_subset_narrows_citations(
 def test_subset_narrows_media(
     full_root: ET.Element, sub_root: ET.Element
 ) -> None:
-    full = _section(full_root, "media", "object")
-    sub = _section(sub_root, "media", "object")
+    full = _section(full_root, "objects", "object")
+    sub = _section(sub_root, "objects", "object")
     assert len(sub) < len(full), (
-        f"subset media ({len(sub)}) must be < full ({len(full)})"
+        f"subset objects ({len(sub)}) must be < full ({len(full)})"
     )
 
 

@@ -17,17 +17,31 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import pytest
+
 from rmread import open_database
 
 from rm2gramps.notes_dedup import load_notes
+from ._fixture import sample_tree_path
 
 
-SAMPLE_TREE = Path("/home/tristan/genealogy_tools/SampleTree.rmtree")
+SAMPLE_TREE = sample_tree_path()
 
 
 def _hash(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
+
+
+#: Skip every test in this module when the sample database is absent.
+#: A fresh clone without `SampleTree.rmtree` is a normal state.
+pytestmark = pytest.mark.skipif(
+    SAMPLE_TREE is None,
+    reason=(
+        "the RootsMagic sample database is not available; set RM_SAMPLE_TREE "
+        "to its path to run these tests"
+    ),
+)
 
 def test_load_notes_returns_notes_by_id_and_hash_to_id() -> None:
     """Both return shapes are populated when DB has inline notes."""

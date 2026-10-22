@@ -27,8 +27,9 @@ from rm2gramps.writer import export_database
 from rm2gramps.xml import write_database
 
 from .grampsdtd import GrampsDtd
+from ._fixture import sample_tree_path
 
-SAMPLE_TREE = Path("/home/tristan/genealogy_tools/SampleTree.rmtree")
+SAMPLE_TREE = sample_tree_path()
 GRAMPS_NS = "http://gramps-project.org/xml/1.7.2/"
 CHANGE = 1700000000
 
@@ -52,12 +53,27 @@ def _wrap(inner: str, section: str) -> ET.Element:
 
 @pytest.fixture(scope="module")
 def full_export_root() -> ET.Element:
+    if SAMPLE_TREE is None:
+        pytest.skip(
+            "the RootsMagic sample database is not available; set "
+            "RM_SAMPLE_TREE to its path to run this test"
+        )
     """Full export of SampleTree.rmtree, parsed. Schema gate for the whole file."""
     return ET.fromstring(export_database(SAMPLE_TREE))
 
 
 # --- section / element names ---------------------------------------
 
+
+
+#: Skip a test that needs the sample database when it is absent.
+requires_sample_tree = pytest.mark.skipif(
+    SAMPLE_TREE is None,
+    reason=(
+        "the RootsMagic sample database is not available; set RM_SAMPLE_TREE "
+        "to its path to run this test"
+    ),
+)
 
 def test_media_section_is_named_objects(full_export_root: ET.Element) -> None:
     """The media section is <objects>, not <media>.

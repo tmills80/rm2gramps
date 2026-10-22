@@ -26,7 +26,20 @@ GRAMPS_NS = "http://gramps-project.org/xml/1.7.2/"
 
 # Optional: when a real Gramps export is present locally (it is not
 # committed), use it as the control in preference to the synthetic one.
-EXAMPLE = Path(__file__).parent / "data" / "example.gramps"
+# It is looked for beside the tests and at the repository root, because
+# that is where it has been kept; the path is resolved at runtime so it
+# holds wherever the package is checked out.
+EXAMPLE = next(
+    (
+        candidate
+        for candidate in (
+            Path(__file__).parent / "data" / "example.gramps",
+            Path(__file__).resolve().parents[3] / "example.gramps",
+        )
+        if candidate.exists()
+    ),
+    Path(__file__).parent / "data" / "example.gramps",
+)
 
 
 def _control_document() -> ET.Element:

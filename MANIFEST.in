@@ -1,0 +1,9 @@
+# The sdist ships the test suite, so it has to ship all of it.
+# setuptools' default only picks up files named `test*.py`, which leaves
+# out `tests/__init__.py` (so the relative imports fail) and
+# `tests/grampsdtd.py` (the DTD matcher the schema tests import).
+recursive-include tests *.py
+
+# The vendored Gramps DTD is a test fixture the DTD-gate tests read.
+include tests/data/grampsxml.dtd
+include tests/data/README.md

@@ -22,16 +22,29 @@ from pathlib import Path
 
 import pytest
 from rmread import SchemaError, open_database
+from ._fixture import sample_tree_path
 
 
-SAMPLE_TREE = Path("/home/tristan/genealogy_tools/SampleTree.rmtree")
+SAMPLE_TREE = sample_tree_path()
 
 
+
+#: Skip a test that needs the sample database when it is absent.
+requires_sample_tree = pytest.mark.skipif(
+    SAMPLE_TREE is None,
+    reason=(
+        "the RootsMagic sample database is not available; set RM_SAMPLE_TREE "
+        "to its path to run this test"
+    ),
+)
+
+@requires_sample_tree
 def test_open_real_rmtree_succeeds() -> None:
     db = open_database(SAMPLE_TREE)
     db.close()
 
 
+@requires_sample_tree
 def test_rmnocase_registered() -> None:
     """rm2gramps queries PlaceTable.Name (COLLATE RMNOCASE) directly.
 

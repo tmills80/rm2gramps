@@ -23,12 +23,24 @@ from pathlib import Path
 import pytest
 
 from rm2gramps.writer import export_database
+from ._fixture import sample_tree_path
 
 
-SAMPLE_TREE = Path("/home/tristan/genealogy_tools/SampleTree.rmtree")
+SAMPLE_TREE = sample_tree_path()
 GRAMPS_NS = "http://gramps-project.org/xml/1.7.2/"
 
 
+
+#: Skip a test that needs the sample database when it is absent.
+requires_sample_tree = pytest.mark.skipif(
+    SAMPLE_TREE is None,
+    reason=(
+        "the RootsMagic sample database is not available; set RM_SAMPLE_TREE "
+        "to its path to run this test"
+    ),
+)
+
+@requires_sample_tree
 def test_writer_round_trip_against_sample_tree() -> None:
     """Run the full export against SampleTree.rmtree and verify structure."""
     payload = export_database(SAMPLE_TREE)
@@ -200,6 +212,7 @@ def test_writer_round_trip_against_sample_tree() -> None:
             )
 
 
+@requires_sample_tree
 def test_writer_is_deterministic_across_two_runs() -> None:
     """Two exports of the same DB produce byte-equal XML.
 
@@ -215,6 +228,7 @@ def test_writer_is_deterministic_across_two_runs() -> None:
     assert payload_a == payload_b
 
 
+@requires_sample_tree
 def test_pinned_change_ts_appears_in_output() -> None:
     """The pinned timestamp is what actually lands in the document.
 
@@ -249,6 +263,7 @@ def test_writer_rejects_missing_file(tmp_path: Path) -> None:
         _export(tmp_path / "does_not_exist.rmtree")
 
 
+@requires_sample_tree
 def test_writer_subset_person_ids() -> None:
     """``person_ids`` filter restricts the exported <people> set."""
     payload_full = export_database(SAMPLE_TREE)
@@ -306,6 +321,7 @@ def _trace(db, fn):
     return result, seen
 
 
+@requires_sample_tree
 def test_load_people_query_count_is_bounded(two_ids: list[int]) -> None:
     """Two people must not cost more statements than a full export.
 
@@ -333,6 +349,7 @@ def test_load_people_query_count_is_bounded(two_ids: list[int]) -> None:
         db.close()
 
 
+@requires_sample_tree
 def test_load_people_query_count_does_not_grow_with_people() -> None:
     """The invariant: statement count is flat in the number of people.
 
@@ -371,6 +388,7 @@ def test_load_people_query_count_does_not_grow_with_people() -> None:
         db.close()
 
 
+@requires_sample_tree
 def test_load_people_batches_each_lookup(two_ids: list[int]) -> None:
     """Each of the five per-person lookups appears at most once.
 
@@ -579,6 +597,11 @@ def _all_hlinks(root: ET.Element) -> set[str]:
 
 @pytest.fixture(scope="module")
 def two_ids() -> list[int]:
+    if SAMPLE_TREE is None:
+        pytest.skip(
+            "the RootsMagic sample database is not available; set "
+            "RM_SAMPLE_TREE to its path to run this test"
+        )
     from rmread import open_database
 
     db = open_database(SAMPLE_TREE)
@@ -594,11 +617,21 @@ def two_ids() -> list[int]:
 
 @pytest.fixture(scope="module")
 def full_root() -> ET.Element:
+    if SAMPLE_TREE is None:
+        pytest.skip(
+            "the RootsMagic sample database is not available; set "
+            "RM_SAMPLE_TREE to its path to run this test"
+        )
     return ET.fromstring(export_database(SAMPLE_TREE))
 
 
 @pytest.fixture(scope="module")
 def sub_root(two_ids: list[int]) -> ET.Element:
+    if SAMPLE_TREE is None:
+        pytest.skip(
+            "the RootsMagic sample database is not available; set "
+            "RM_SAMPLE_TREE to its path to run this test"
+        )
     return ET.fromstring(export_database(SAMPLE_TREE, person_ids=two_ids))
 
 
@@ -676,6 +709,7 @@ def test_subset_emits_no_unreferenced_leaves(sub_root: ET.Element) -> None:
         )
 
 
+@requires_sample_tree
 def test_empty_subset_emits_no_people() -> None:
     """An unknown PersonID must not ship 40% of the database.
 
@@ -747,6 +781,7 @@ def test_citationrefs_survive_noteref_injection(full_root: ET.Element) -> None:
     (3, "Source"),
     (4, "Citation"),
 ])
+@requires_sample_tree
 def test_medialink_ownertype_resolves_to_target_table(
     owner_type: int, expected: str,
 ) -> None:

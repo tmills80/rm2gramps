@@ -1,13 +1,22 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "rm2gramps"
 version = "0.0.1"
 description = "Convert RootsMagic 11 .rmtree SQLite databases to Gramps XML .gramps files."
+license = "MIT"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["rmread>=0.0.1"]
+
+[project.optional-dependencies]
+# Test-only. rmread is a runtime dependency of this tool already; the
+# group exists so `pip install -e tools/rm2gramps[test]` pulls in the
+# test runner alongside it.
+test = [
+    "pytest>=8",
+]
 
 [project.scripts]
 rm2gramps = "rm2gramps.cli.export:main"

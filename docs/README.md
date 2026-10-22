@@ -79,13 +79,20 @@ Standard src-layout package. The CLI entry point
 `rm2gramps` is registered via `[project.scripts]` in `pyproject.toml`.
 
 ```sh
-# from inside tools/rm2gramps/
+# from the repository root — resolves the rmread dependency
+uv sync --all-packages --all-extras
+uv pip install -e tools/rm2gramps
+
+# or, from inside tools/rm2gramps/ (pip resolves rmread from PyPI
+# once it is published there):
 pip install -e .
-# or just use it without installing — see Usage below.
 ```
 
-`rm2gramps` depends on `rmread` for the SQLite open path. Both are
-stdlib-only Python; no third-party packages.
+`rm2gramps` depends on `rmread` for the SQLite open path, and declares
+it as a runtime dependency. Both are stdlib-only Python; no third-party
+packages. `rmread` is not yet on PyPI, so in a checkout the workspace
+root (`pyproject.toml` at the repository root) is what makes the
+dependency resolvable.
 
 ## Usage
 
@@ -194,6 +201,16 @@ need no fixture; writer and CLI tests use `SampleTree.rmtree` (RM
 
 ```sh
 python -m pytest tools/rm2gramps/tests/
+```
+
+The integration tests need the `SampleTree.rmtree` sample database. It
+is gitignored, so it is absent from a fresh clone; those tests are
+**skipped** rather than failed when it is missing. Point `RM_SAMPLE_TREE`
+at it to run them:
+
+```sh
+RM_SAMPLE_TREE=/path/to/SampleTree.rmtree \
+  python -m pytest tools/rm2gramps/tests/
 ```
 
 ### Schema conformance (`test_schema.py`)

@@ -21,11 +21,23 @@ from pathlib import Path
 import pytest
 
 from rm2gramps.cli.export import main
+from ._fixture import sample_tree_path
 
 
-SAMPLE_TREE = Path("/home/tristan/genealogy_tools/SampleTree.rmtree")
+SAMPLE_TREE = sample_tree_path()
 
 
+
+#: Skip a test that needs the sample database when it is absent.
+requires_sample_tree = pytest.mark.skipif(
+    SAMPLE_TREE is None,
+    reason=(
+        "the RootsMagic sample database is not available; set RM_SAMPLE_TREE "
+        "to its path to run this test"
+    ),
+)
+
+@requires_sample_tree
 def test_cli_writes_gzipped_file_by_default(tmp_path: Path) -> None:
     """Default output is gzip-compressed (magic bytes 0x1f 0x8b)."""
     out = tmp_path / "out.gramps"
@@ -35,6 +47,7 @@ def test_cli_writes_gzipped_file_by_default(tmp_path: Path) -> None:
     assert data[:2] == b"\x1f\x8b", "output not gzipped"
 
 
+@requires_sample_tree
 def test_cli_no_gzip_writes_raw_xml(tmp_path: Path) -> None:
     """``--no-gzip`` produces raw XML starting with the declaration."""
     out = tmp_path / "out.gramps"
@@ -51,6 +64,7 @@ def test_cli_no_gzip_writes_raw_xml(tmp_path: Path) -> None:
     assert raw.startswith(b"<?xml")
 
 
+@requires_sample_tree
 def test_cli_person_ids_subset(tmp_path: Path) -> None:
     """``--person-ids 1,2`` restricts the export to those PersonIDs."""
     import sqlite3

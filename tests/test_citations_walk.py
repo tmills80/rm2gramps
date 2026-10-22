@@ -23,15 +23,30 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import pytest
+
 from rmread import open_database
 
 # rmread is the source of truth for the citation walker now.
 from rmread.linktables import walk_citation_links
 
+from ._fixture import sample_tree_path
 
-SAMPLE_TREE = Path("/home/tristan/genealogy_tools/SampleTree.rmtree")
+
+SAMPLE_TREE = sample_tree_path()
 
 
+
+#: Skip a test that needs the sample database when it is absent.
+requires_sample_tree = pytest.mark.skipif(
+    SAMPLE_TREE is None,
+    reason=(
+        "the RootsMagic sample database is not available; set RM_SAMPLE_TREE "
+        "to its path to run this test"
+    ),
+)
+
+@requires_sample_tree
 def test_walk_returns_dict_of_owner_type_to_owner_id_to_citation_ids() -> None:
     """Walker yields Person / Family / Source dicts, each
     {owner_id: (citation_id, ...)}."""
@@ -60,6 +75,7 @@ def test_walk_returns_dict_of_owner_type_to_owner_id_to_citation_ids() -> None:
     assert result["Citation"] == {}
 
 
+@requires_sample_tree
 def test_walk_respects_person_ids_subset() -> None:
     """``person_ids`` filter narrows the result to citations
     referencing those persons (or their families/events).
@@ -107,9 +123,10 @@ def test_writer_does_not_inline_link_walks() -> None:
     import re
     from pathlib import Path
 
-    src = Path(
-        "/home/tristan/genealogy_tools/tools/rm2gramps/src/rm2gramps/"
-        "writer.py"
+    # The source file, located relative to this test file so the path
+    # holds wherever the package is checked out.
+    src = (
+        Path(__file__).resolve().parent.parent / "src" / "rm2gramps" / "writer.py"
     ).read_text()
 
     # Raw SELECTs against the link tables — the smell this test
@@ -128,6 +145,7 @@ def test_writer_does_not_have_a_citations_walk_module() -> None:
 
 
 
+@requires_sample_tree
 def test_walk_warns_on_unknown_owner_type(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -148,6 +166,7 @@ def test_walk_warns_on_unknown_owner_type(
     assert any("OwnerType" in r.getMessage() for r in warnings)
 
 
+@requires_sample_tree
 def test_walk_skips_unknown_owner_types_silently() -> None:
     """Returned dict has no key for unknown OwnerTypes — only the five
     buckets in the verified OwnerType enum. OwnerTypes 7 and 19 appear
@@ -165,10 +184,8 @@ def test_walk_skips_unknown_owner_types_silently() -> None:
     )
 
 
-# Reference to pytest for type-checkers; the import is already at the
-# top via test_writer.py but pytest fixtures need it imported here
-# too for the caplog parameter annotation.
-import pytest  # noqa: E402
+# `pytest` is imported at the top of this module: the module-level
+# skip marker and the `caplog` fixture annotation both need it.
 
 
 # --- OwnerType semantics --------------------------------------------------
@@ -192,6 +209,7 @@ def _bucket_ids(con, owner_type: int) -> set[int]:
     }
 
 
+@requires_sample_tree
 def test_ownertype_2_is_event_not_source() -> None:
     """OwnerType=2 references EventIDs, not SourceIDs."""
     db = open_database(SAMPLE_TREE)
@@ -215,6 +233,7 @@ def test_ownertype_2_is_event_not_source() -> None:
         db.close()
 
 
+@requires_sample_tree
 def test_ownertype_0_is_person_and_1_is_family() -> None:
     """OwnerTypes 0 and 1 keep their Person / Family meaning."""
     db = open_database(SAMPLE_TREE)
@@ -229,6 +248,7 @@ def test_ownertype_0_is_person_and_1_is_family() -> None:
         db.close()
 
 
+@requires_sample_tree
 def test_ownertype_enum_is_shared_across_link_tables() -> None:
     """MediaLinkTable uses the same enum as CitationLinkTable.
 
@@ -260,6 +280,7 @@ def test_ownertype_enum_is_shared_across_link_tables() -> None:
         db.close()
 
 
+@requires_sample_tree
 def test_addresslink_ownertype_3_is_source() -> None:
     """AddressLinkTable OwnerType=3 OwnerIDs are all SourceIDs.
 
@@ -318,6 +339,7 @@ def test_addresslink_ownertype_3_is_source() -> None:
 # schema.
 
 
+@requires_sample_tree
 def test_walker_does_not_labour_events_as_sources() -> None:
     """The walker's Source bucket must not be populated by EventIDs.
 
@@ -340,6 +362,7 @@ def test_walker_does_not_labour_events_as_sources() -> None:
         db.close()
 
 
+@requires_sample_tree
 def test_walker_reports_unknown_ownertypes_separately() -> None:
     """OwnerType=2 must map to its own key, not be silently dropped.
 
@@ -362,6 +385,7 @@ def test_walker_reports_unknown_ownertypes_separately() -> None:
         db.close()
 
 
+@requires_sample_tree
 def test_walker_event_bucket_matches_the_db() -> None:
     """The Event bucket holds exactly the OwnerType=2 rows."""
     db = open_database(SAMPLE_TREE)

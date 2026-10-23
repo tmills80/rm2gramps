@@ -51,11 +51,6 @@ GRAMPS_NOTE_TYPES: dict[str, str] = {
     "CitationTable.ActualText": "Source text",
 }
 
-#: The RM columns whose note text is a *transcription* rather than a
-#: comment. These are exported as notes attached to their owner.
-TRANSCRIPTION_COLUMNS = ("SourceTable.ActualText", "CitationTable.ActualText")
-
-
 def note_key(note_type: str, text: str) -> str:
     """The dedup key for a note: its type and its text.
 
@@ -66,10 +61,6 @@ def note_key(note_type: str, text: str) -> str:
     return hashlib.sha256(
         f"{note_type}\0{text}".encode("utf-8")
     ).hexdigest()
-
-
-def _hash_text(s: str) -> str:
-    return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
 def _collect_table_notes(

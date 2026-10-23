@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from rmread.rmtext import Span, plain_text
+from rmread.rmtext import plain_text
 
 from .handles import format_display_id, note_handle
 from .xmlutil import xml_escape
@@ -62,7 +62,6 @@ class NoteRecord:
     note_id: int
     text: str
     note_type: str = "General"
-    spans: tuple[Span, ...] = ()
 
 
 def _style_elements(spans: tuple[Span, ...]) -> list[str]:
@@ -118,7 +117,7 @@ def render_note_xml(rec: NoteRecord, *, change: int) -> str:
 
     resolved = plain_text(rec.text)
     text = resolved.text
-    spans = rec.spans or tuple(resolved.spans)
+    spans = resolved.spans
 
     parts = [
         f'<note handle="{handle}" change="{int(change)}" '

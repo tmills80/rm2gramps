@@ -145,6 +145,20 @@ which stays a deliberate copy; no longer true of the package).
    re-import of a v2.2 export will not match its notes by handle.
    Display ids stay sequential (`N0001`), matching Gramps' convention.
 
+   **Where this still diverges from Gramps, stated as a choice.** A
+   note is shared between every owner that has the same `(type, text)`
+   — so two people who wrote the same research note end up pointing at
+   one `<note>`. Gramps does not do that: in the user's own export
+   (425 notes) **no note is referenced by more than one owner**, and 20
+   groups of byte-identical notes exist with distinct handles. Gramps
+   neither shares nor deduplicates.
+
+   rm2gramps collapses, and that is deliberate — it keeps the export
+   small and the v2.2 Plan locked it ("Researcher can split in
+   Gramps"). But the type is now part of the key, so a collapse can
+   never merge two notes of *different* types, which is the failure
+   that matters. Sharing between owners of the *same* type stays.
+
 ## Schema reference
 
 `tools/rmread/docs/rm11-schema.md` — notes are inline columns, not a

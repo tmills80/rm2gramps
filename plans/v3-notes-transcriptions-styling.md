@@ -226,6 +226,9 @@ that round-trips.
 
 ## Tasks
 
+Status: **T40–T44 done** (commits `7357ac8`, `559c5d0`, `1168052`,
+`b09ad40`); T45 verified by hand, listed below.
+
 ### T40. `rmread.rmtext` (test-first)
 
 New module `tools/rmread/src/rmread/rmtext.py`, new test file
@@ -326,3 +329,40 @@ note's text length, every `<note>` type is a known Gramps type.
 - `rmcite`'s public API and its test suite are unchanged.
 - The rm-dump version constant stays a copy, and its guard test still
   fails when `rmread` bumps the version.
+
+## Verification record
+
+Full SampleTree.rmtree export, `tools/rm2gramps/tests/data/grampsxml.dtd`
+checked by `tests/grampsdtd.py`:
+
+| Check | Result |
+|---|---|
+| rmread suite | 127 passed |
+| rmcite suite | 52 passed |
+| rm2gramps suite | 199 passed |
+| notes emitted | 128 |
+| style elements | 28 (25 bold, 3 italic) |
+| undeclared elements vs DTD | 0 |
+| content-model errors vs DTD | 0 |
+| source transcriptions exported | 47 of 47 non-empty |
+| citation transcriptions exported | 31 of 31 non-empty |
+| notes with literal `<b>` / `<i>` left in the text | 0 |
+| notes carrying a non-Gramps type name | 0 |
+| notes sharing a rendered text with another note | 0 |
+| dangling `<noteref>` | 0 |
+| notes referenced by nothing | 0 |
+| notes preserving the literal `<assistant curate>` | 1 |
+
+Every guard was seen biting, by re-introducing the defect and running
+the suite:
+
+| Defect re-introduced | Suite that caught it |
+|---|---|
+| dedup key drops the type | rm2gramps `test_same_text_under_different_types_is_a_different_note` |
+| CRLF left in the exported text | rm2gramps `test_crlf_is_normalised_and_ranges_measure_the_normalised_text` |
+| rmread drops unknown tags | rmread `test_plain_text_keeps_unknown_tags_verbatim` **and** rm2gramps `test_unknown_tag_survives_as_literal_text` |
+| rmcite carries its own tokenizer | rmcite `test_parser_uses_the_shared_rmread_tokenizer` |
+
+The third row is the one that matters most: it is a guard that spans
+two packages, so it was proven by mutating the *producer* (rmread)
+and watching the *consumer* (rm2gramps) fail.

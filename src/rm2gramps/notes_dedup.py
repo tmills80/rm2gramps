@@ -1,16 +1,21 @@
-"""Inline-note loader + sha256 dedup.
+"""Inline-note loader + dedup.
 
-Walks every inline ``Note TEXT`` column on Person / Event /
-Family / Source / Place / Citation, dedups by sha256 of the
-text, returns ``(notes_by_id, hash_to_id)``.
+Walks every inline note column on Person / Event / Family / Source
+/ Place / Citation, dedups by (type, text), returns
+``(notes_by_id, key_to_id)``.
 
 RM has no separate NoteTable — notes are stored inline on each
-owner. This module is the writer-side dedup that turns that
-inline representation into a synthesised ``NoteRecord`` list.
+owner. This module is the writer-side dedup that turns that inline
+representation into a synthesised ``NoteRecord`` list.
+
+Why the key is (type, text) and not text alone: the type is part of
+a note's identity. "Only father" exists in SampleTree as both a
+``Citation`` and a ``Source text``; collapsing them would give one of
+the two the wrong Gramps type.
 
 Why sha256: stable, collision-resistant for text under ~100KB.
-The Plan-locked caveat applies — two byte-identical notes
-collapse to one <note>. Researcher can split in Gramps.
+The Plan-locked caveat applies — two byte-identical notes of the
+same type collapse to one <note>. Researcher can split in Gramps.
 
 Schema reference: ``tools/rmread/docs/rm11-schema.md`` §"Notes
 inline on every owner table".
@@ -22,6 +27,45 @@ import hashlib
 import sqlite3
 
 from .notes import NoteRecord
+
+#: RM note-bearing column → Gramps note type name.
+#:
+#: The type names are Gramps' own English strings, spelled exactly as
+#: ``gramps/gen/lib/notetype.py`` spells them. Gramps' importer
+#: matches the ``type`` attribute case-sensitively against its map of
+#: those names, so a name that is not in the map imports as a
+#: *custom* type instead — which is what v2.2's ``type="general"``
+#: produced, since "general" is not a Gramps type name ("General" is).
+#:
+#: ``ActualText`` is the researcher's verbatim transcription: of the
+#: source for ``SourceTable``, of the specific citation for
+#: ``CitationTable``. Gramps' own type for both is "Source text".
+GRAMPS_NOTE_TYPES: dict[str, str] = {
+    "PersonTable.Note": "Person Note",
+    "EventTable.Note": "Event Note",
+    "FamilyTable.Note": "Family Note",
+    "PlaceTable.Note": "Place Note",
+    "SourceTable.Comments": "Source Note",
+    "SourceTable.ActualText": "Source text",
+    "CitationTable.Comments": "Citation",
+    "CitationTable.ActualText": "Source text",
+}
+
+#: The RM columns whose note text is a *transcription* rather than a
+#: comment. These are exported as notes attached to their owner.
+TRANSCRIPTION_COLUMNS = ("SourceTable.ActualText", "CitationTable.ActualText")
+
+
+def note_key(note_type: str, text: str) -> str:
+    """The dedup key for a note: its type and its text.
+
+    The type is part of the key because it is part of the note's
+    identity — the same words as a "Citation" and as a "Source text"
+    are two different notes in Gramps.
+    """
+    return hashlib.sha256(
+        f"{note_type}\0{text}".encode("utf-8")
+    ).hexdigest()
 
 
 def _hash_text(s: str) -> str:
@@ -83,7 +127,7 @@ def load_notes(
     place_ids: set[int] | None = None,
     citation_ids: set[int] | None = None,
 ) -> tuple[dict[int, NoteRecord], dict[str, int]]:
-    """Collect inline notes from every owner table, dedup by sha256.
+    """Collect inline notes from every owner table, dedup by (type, text).
 
     Owner-id-set arguments scope which rows are read from each
     table. Pass ``None`` (the default) for "all rows in this
@@ -98,11 +142,11 @@ def load_notes(
     -------
     notes_by_id
         Map of synthesised note_id (1..N) → NoteRecord. ``note_id``
-        is assigned in first-seen order of unique text values.
-    hash_to_id
-        Map of sha256(text) → note_id. Lets callers attach
-        ``<noteref>`` children by hashing the owner's note text
-        the same way and finding the resulting id.
+        is assigned in first-seen order of unique notes.
+    key_to_id
+        Map of note key → note_id. Lets callers attach
+        ``<noteref>`` children by keying the owner's note text the
+        same way and finding the resulting id.
 
     Notes
     -----
@@ -111,7 +155,7 @@ def load_notes(
     ``<note>`` (Plan-locked Decision 1 / Risk 4).
     """
     notes_by_id: dict[int, NoteRecord] = {}
-    hash_to_id: dict[str, int] = {}
+    key_to_id: dict[str, int] = {}
     next_id = 1
 
     # Each entry: (table, note_column, owner_column, owner_id_filter)
@@ -122,6 +166,10 @@ def load_notes(
         ("SourceTable", "Comments", "SourceID", source_ids),
         ("PlaceTable", "Note", "PlaceID", place_ids),
         ("CitationTable", "Comments", "CitationID", citation_ids),
+        # Transcriptions: the researcher's verbatim text of the
+        # source and of the specific citation.
+        ("SourceTable", "ActualText", "SourceID", source_ids),
+        ("CitationTable", "ActualText", "CitationID", citation_ids),
     ]
 
     for table, note_col, owner_col, id_filter in sources:
@@ -139,35 +187,38 @@ def load_notes(
         except sqlite3.OperationalError:
             continue
 
+        note_type = GRAMPS_NOTE_TYPES[f"{table}.{note_col}"]
         for owner_id, text in entries:
             stripped = text.strip()
             if not stripped:
                 continue
-            h = _hash_text(stripped)
-            if h not in hash_to_id:
-                hash_to_id[h] = next_id
+            key = note_key(note_type, stripped)
+            if key not in key_to_id:
+                key_to_id[key] = next_id
                 notes_by_id[next_id] = NoteRecord(
-                    note_id=next_id, text=stripped,
+                    note_id=next_id, text=stripped, note_type=note_type,
                 )
                 next_id += 1
             # We don't currently expose owner → note_id maps; the
             # cross-reference injection (T27) handles owner-side
-            # resolution by re-hashing the owner's note text.
+            # resolution by re-keying the owner's note text.
 
-    return notes_by_id, hash_to_id
+    return notes_by_id, key_to_id
 
 
 def note_ids_for_texts(
     texts: list[str],
-    hash_to_id: dict[str, int],
+    key_to_id: dict[str, int],
+    *,
+    note_type: str,
 ) -> list[int]:
     """Resolve owner note texts to synthesised note_ids.
 
     Used by the writer when attaching <noteref> children to an
-    owner element. For each non-empty text, hash it the same way
+    owner element. For each non-empty text, key it the same way
     as :func:`load_notes` and look up the resulting id in
-    ``hash_to_id``. Texts whose hash isn't in the map (because
-    they weren't loaded for some reason) are skipped — defensive
+    ``key_to_id``. Texts whose key isn't in the map (because they
+    weren't loaded for some reason) are skipped — defensive
     against the writer's export scope having changed between
     loading and rendering.
 
@@ -176,8 +227,11 @@ def note_ids_for_texts(
     texts
         Note text strings from a single owner (e.g. one Person's
         ``Note`` column plus any per-name notes).
-    hash_to_id
-        The hash → id map from :func:`load_notes`.
+    key_to_id
+        The key → id map from :func:`load_notes`.
+    note_type
+        The Gramps type name for these texts. Part of the key, so
+        it must match what ``load_notes`` used.
 
     Returns
     -------
@@ -192,8 +246,8 @@ def note_ids_for_texts(
     for text in texts:
         if not text or not text.strip():
             continue
-        h = _hash_text(text.strip())
-        nid = hash_to_id.get(h)
+        key = note_key(note_type, text.strip())
+        nid = key_to_id.get(key)
         if nid is not None:
             out.append(nid)
     return out

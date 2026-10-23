@@ -14,22 +14,17 @@ Tests run against ``SampleTree.rmtree`` (RM 11.0, 4.6 MB).
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
 import pytest
 
 from rmread import open_database
 
-from rm2gramps.notes_dedup import load_notes
+from rm2gramps.notes_dedup import load_notes, note_key
 from ._fixture import sample_tree_path
 
 
 SAMPLE_TREE = sample_tree_path()
-
-
-def _hash(s: str) -> str:
-    return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
 
@@ -61,22 +56,26 @@ def test_load_notes_returns_notes_by_id_and_hash_to_id() -> None:
     )
 
 
-def test_load_notes_dedup_by_text_hash() -> None:
-    """Identical text → one note, not many."""
+def test_load_notes_dedup_by_type_and_text() -> None:
+    """Identical (type, text) → one note, not many.
+
+    The type is part of the key: the same words as a "Citation" and
+    as a "Source text" are two different notes in Gramps.
+    """
     db = open_database(SAMPLE_TREE)
     try:
-        notes_by_id, hash_to_id = load_notes(db.con)
+        notes_by_id, key_to_id = load_notes(db.con)
     finally:
         db.close()
 
-    # Walk the keys: each hash should map to exactly one note.
-    for h, nid in hash_to_id.items():
-        assert nid in notes_by_id, f"hash {h[:8]} → {nid} but no note {nid}"
-        # The note's text should hash to the same key.
+    # Walk the keys: each key should map to exactly one note.
+    for key, nid in key_to_id.items():
+        assert nid in notes_by_id, f"key {key[:8]} → {nid} but no note {nid}"
+        # The note's (type, text) should produce the same key.
         note = notes_by_id[nid]
-        assert _hash(note.text) == h, (
-            f"hash mismatch for note {nid}: {h[:8]} vs "
-            f"{_hash(note.text)[:8]}"
+        assert note_key(note.note_type, note.text) == key, (
+            f"key mismatch for note {nid}: {key[:8]} vs "
+            f"{note_key(note.note_type, note.text)[:8]}"
         )
 
 

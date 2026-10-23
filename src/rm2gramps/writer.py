@@ -47,7 +47,11 @@ from .handles import (
 )
 from .media import MediaRecord, render_media_xml
 from .notes import render_note_xml
-from .notes_dedup import load_notes, note_ids_for_texts
+from .notes_dedup import (
+    GRAMPS_NOTE_TYPES,
+    load_notes,
+    note_ids_for_texts,
+)
 from .people import NameRecord, PersonRecord, render_person_xml
 from .places import PlaceRecord, render_place_xml
 from .repositories import RepositoryRecord, render_repository_xml
@@ -788,18 +792,26 @@ def export_database(
             render_citation_xml(c, change=ts) for c in citations
         ]
         # No silent failure: AGENTS.md requires surfacing what was not
-        # exported. A citation transcription (ActualText /
-        # ShortFootnote) has no legal home on a <citation> — Gramps
-        # models it as a <note> — so it stays in RootsMagic only.
-        untranscribed = sum(
-            1 for c in citations if c.actual_text or c.short_footnote
+        # exported.
+        #
+        # The transcription (ActualText) is exported — as a "Source
+        # text" note on the citation, which is where Gramps models a
+        # transcription. What has no home is RM's *rendered* citation
+        # string: ShortFootnote, Footnote and Bibliography are the
+        # output of applying the source template, not source text, and
+        # Gramps renders its own from the citation's fields.
+        unrendered = sum(
+            1
+            for c in citations
+            if c.short_footnote or c.footnote or c.bibliography
         )
-        if untranscribed:
+        if unrendered:
             print(
-                f"# note: {untranscribed} citation(s) carry a "
-                f"transcription (ActualText/ShortFootnote) that the "
-                f"Gramps schema has no place for on a <citation>; the "
-                f"text stayed in RootsMagic and was not exported. See "
+                f"# note: {unrendered} citation(s) carry a rendered "
+                f"citation string (ShortFootnote/Footnote/Bibliography); "
+                f"those are RootsMagic's own rendering of the source "
+                f"template, not source text, so they were not exported. "
+                f"Gramps renders its own from the citation's fields. See "
                 f"src/rm2gramps/citations.py module docstring.",
                 file=sys.stderr,
             )
@@ -940,10 +952,14 @@ def export_database(
             owner_type: str,
             owner_id: int,
         ) -> tuple[str, ...]:
-            nids = note_ids_for_texts(
-                note_texts_by_owner.get(owner_type, {}).get(owner_id, []),
-                hash_to_id,
-            )
+            entries = note_texts_by_owner.get(owner_type, {}).get(owner_id, [])
+            nids: list[int] = []
+            for note_type, text in entries:
+                nids.extend(
+                    note_ids_for_texts(
+                        [text], hash_to_id, note_type=note_type,
+                    )
+                )
             return tuple(note_handle(nid) for nid in nids)
 
         def _objref_for_owner(
@@ -1202,14 +1218,18 @@ def _load_note_texts_by_owner(
     citation_ids: set[int],
     place_ids: set[int],
 ) -> dict[str, dict[int, list[str]]]:
-    """Bulk-fetch ``{owner_id: [note_text]}`` for each owner type.
+    """Bulk-fetch ``{owner_id: [(note_type, note_text)]}`` per owner.
 
-    Five batched SELECTs; the result maps ``owner_type_key`` (e.g.
-    ``"Person"``) → ``{owner_id: [text, ...]}``. Missing owners
-    get no entry in their type's dict (caller treats that as
+    Batched SELECTs; the result maps ``owner_type_key`` (e.g.
+    ``"Person"``) → ``{owner_id: [(note_type, text), ...]}``. Missing
+    owners get no entry in their type's dict (caller treats that as
     "no notes").
+
+    The type travels with the text because it is part of the note's
+    identity: the dedup key is (type, text), so resolving an owner's
+    note needs both.
     """
-    out: dict[str, dict[int, list[str]]] = {
+    out: dict[str, dict[int, list[tuple[str, str]]]] = {
         "Person": {}, "Event": {}, "Family": {}, "Source": {},
         "Citation": {}, "Place": {},
     }
@@ -1218,6 +1238,7 @@ def _load_note_texts_by_owner(
               ids: set[int], key: str) -> None:
         if not ids:
             return
+        note_type = GRAMPS_NOTE_TYPES[f"{table}.{note_col}"]
         placeholders = ",".join("?" for _ in ids)
         rows = con.execute(
             f"SELECT {id_col}, {note_col} FROM {table} "
@@ -1228,7 +1249,7 @@ def _load_note_texts_by_owner(
             text = r[note_col] or ""
             if not text.strip():
                 continue
-            out[key].setdefault(r[id_col], []).append(text)
+            out[key].setdefault(r[id_col], []).append((note_type, text))
 
     _bulk("PersonTable", "PersonID", "Note", people_ids, "Person")
     _bulk("EventTable", "EventID", "Note", event_ids, "Event")
@@ -1244,4 +1265,11 @@ def _load_note_texts_by_owner(
     # researchers can attach free-form notes to a place (common
     # for things like "this church was demolished in 1972").
     _bulk("PlaceTable", "PlaceID", "Note", place_ids, "Place")
+    # Transcriptions. `ActualText` is the researcher's verbatim text
+    # of the source and of the specific citation — the material the
+    # whole point of a citation is. v2.2 dropped it; Gramps carries
+    # it as a "Source text" note on the owner.
+    _bulk("SourceTable", "SourceID", "ActualText", source_ids, "Source")
+    _bulk("CitationTable", "CitationID", "ActualText",
+           citation_ids, "Citation")
     return out

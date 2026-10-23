@@ -20,12 +20,20 @@ real Gramps export never emits one on a citation. Gramps' own model
 is that a transcription is a *note* attached to the citation, which
 is where this belongs.
 
-So ``actual_text`` / ``short_footnote`` are not rendered here. They are
-not silently dropped: the writer counts how many citations carried a
-transcription and warns once per export, naming the count, so the
-researcher knows the text stayed in RootsMagic and was not exported.
-Surfacing it as a real ``<note>`` is v3 work (it needs the note
-dedup path to accept citation transcriptions as inputs).
+So ``actual_text`` / ``short_footnote`` are not rendered *here*. Where
+they go instead:
+
+* ``actual_text`` — the researcher's verbatim transcription of this
+  citation — is exported as a ``<note>`` of Gramps type "Source text",
+  attached to the citation with a ``<noteref>``. That is where Gramps
+  models a transcription, and the writer's note loader takes citation
+  transcriptions as inputs.
+* ``short_footnote`` / ``footnote`` / ``bibliography`` — RootsMagic's
+  *rendered* citation string, the output of applying the source
+  template — are not source text and are not exported. Gramps renders
+  its own from the citation's own fields. The writer counts the
+  citations that carried one and warns once per export, naming the
+  count, so nothing is dropped silently.
 
 SourceFields BLOB and CitationFields BLOB are ignored (RM
 internal serialisation, not portable to Gramps XML).

@@ -13,26 +13,83 @@ fact-type vocabulary, full citation detail, multimedia links, and
 the full place hierarchy. This tool goes directly from `.rmtree` to
 `.gramps` and preserves all of that.
 
-## Status: v2.2
+## Status: v3
 
-v2.2 ships all nine Gramps object types that `.gramps` supports:
-people, events, families, places (v1); citations, sources (v2.1);
-notes, media, repositories (v2.2).
+v3 ships all nine Gramps object types that `.gramps` supports, with
+notes that mean what Gramps means by a note — right type, real
+transcriptions, and RootsMagic's markup carried across as style ranges.
 
-v2.2 additions:
-- **Notes:** inline `Note TEXT` columns on Person / Event /
-  Family / Place become one `<note>` per unique text (sha256
-  dedup). Sources and Citations use `Comments` for the same
-  field. Notes are referenced via `<noteref hlink="_g_n<N>"/>` on
-  every owner that carries them.
-- **Media:** `<object>` elements for media referenced by
-  exported Person / Source / Citation / Event via `MediaLinkTable`.
-  Thumbnail BLOBs dropped (Gramps re-extracts on import from the
-  source file). `<mediaref>` on the four owner types.
-- **Repositories:** `<repository>` elements for AddressTable rows
-  linked to exported citations via `AddressLinkTable.OwnerType=3`.
-  `<reporef>` on citations only. `AddressType` ignored — every
-  address linked to a citation is a repository by convention.
+| Version | Adds |
+|---|---|
+| v1 | people, events, families, places |
+| v2.1 | citations, sources |
+| v2.2 | notes, media, repositories |
+| v2.3 | schema conformance fix against the Gramps DTD |
+| v3 | typed notes, transcriptions, styling |
+
+### v3 — note types, transcriptions, styling
+
+v2.2 shipped notes as an afterthought: every note came out
+`type="general"` with the text flattened. Three defects followed, and
+v3 fixes all three.
+
+**1. Wrong type.** `type="general"` is not a Gramps type name.
+Gramps' `GrampsType.set_from_xml_str` looks the string up in
+`_E2IMAP`, keyed on the exact English type name and matched
+**case-sensitively**. `"general"` is not a key, so Gramps imported
+every rm2gramps note as a *custom* type literally named "general"
+instead of the built-in "General". Every note now carries Gramps' own
+English type name, one per RM column:
+
+| RM column | Gramps type | SampleTree non-empty |
+|---|---|---|
+| `PersonTable.Note` | `Person Note` | 5 |
+| `EventTable.Note` | `Event Note` | 33 |
+| `FamilyTable.Note` | `Family Note` | 11 |
+| `PlaceTable.Note` | `Place Note` | 0 |
+| `SourceTable.Comments` | `Source Note` | 6 |
+| `SourceTable.ActualText` | `Source text` | 47 |
+| `CitationTable.Comments` | `Citation` | 2 |
+| `CitationTable.ActualText` | `Source text` | 31 |
+
+**2. Lost transcriptions.** `SourceTable.ActualText` (47 non-empty rows
+in SampleTree) and `CitationTable.ActualText` (31 rows) are the
+researcher's verbatim transcription — of the source, and of the
+specific citation. v2.2 exported none of it. Both now become `Source
+text` notes, referenced from their `<source>` / `<citation>` owner.
+
+**3. Lost styling.** RM note text carries `<b>` and `<i>`; v2.2 escaped
+them into the note text as literal markup. They now survive as
+Gramps `<style>` / `<range>` children.
+
+Two consequences of the v3 work worth knowing:
+
+- **The dedup key is `(type, text)`, not text.** The same words as a
+  `Citation` and as a `Source text` are two different notes in
+  Gramps, so the type is part of the key
+  (sha256 of `f"{type}\0{text}"`). Collapsing them would give one of
+  the two the wrong type.
+- **The RootsMagic markup dialect lives in `rmread`**, not here.
+  `rmread.rmtext` provides `tokenize()`, `plain_text()` and
+  `normalize_newlines()`. It is a fact about the RootsMagic file
+  format, so it belongs to the package that reads that format — and
+  `rmcite` consumes the same tokenizer.
+
+### v2.2 — media and repositories
+
+- **Media:** `<object>` elements for media referenced by exported
+  Person / Source / Citation / Event via `MediaLinkTable`. Thumbnail
+  BLOBs dropped (Gramps re-extracts on import from the source file).
+  `<objref>` on the four owner types.
+- **Repositories:** `<repository>` elements for `AddressTable` rows
+  linked to an exported source via `AddressLinkTable.OwnerType=3` —
+  OwnerType 3 is **Source** in the global enum, not Citation. The
+  `<reporef>` therefore lands on the `<source>`, which is also where
+  the DTD allows it (`<source>` declares `reporef*`; `<citation>`
+  does not). `AddressType` ignored — every address linked to a
+  source is a repository by convention.
+
+### `--person-ids` narrowing
 
 `--person-ids` narrows **everything** transitively: citations,
 sources, media, repositories, notes, places. Each object type is
@@ -42,7 +99,9 @@ exported citation parents under it. Exporting 3 of 429 people in
 `SampleTree.rmtree` yields ~7 KB against ~510 KB for the full
 export.
 
-Gramps import invariants enforced by the round-trip test:
+### Gramps import invariants
+
+Enforced by the round-trip test:
 - Every `<citationref>` / `<noteref>` / `<objref>` / `<reporef>`
   resolves to a real target (0 dangling across a full SampleTree
   export).
@@ -52,26 +111,67 @@ Gramps import invariants enforced by the round-trip test:
   whose only citation was dropped (10 of 204). Those ship unreferenced
   — harmless for import, but don't read the count as a bug.
 
-Known limitations:
-- Inline notes use plain `<text>` only (no styling); v3 will
-  lift to `<styledtext>`.
+### One deliberate divergence: shared notes
+
+rm2gramps emits **one `<note>` per unique `(type, text)`**, shared by
+every owner that carries it. Gramps does neither sharing nor
+deduplication: in a real Gramps export of the same tree, no note is
+referenced by more than one owner, and 20 groups of byte-identical
+notes exist with distinct handles.
+
+The collapse stays — v2.2 locked it, and it keeps the export small.
+But it is now a stated choice rather than an accident, with the limit
+spelled out: because the type is part of the key, a collapse can never
+merge two notes of different types. A researcher who wants Gramps'
+one-note-per-owner shape splits them on import.
+
+### v3 verification record
+
+Full `SampleTree.rmtree` export, checked against the vendored DTD:
+
+| Check | Result |
+|---|---|
+| notes emitted | 128 |
+| style elements | 28 (25 bold, 3 italic) |
+| undeclared elements vs DTD | 0 |
+| content-model errors vs DTD | 0 |
+| source transcriptions exported | 47 of 47 non-empty |
+| citation transcriptions exported | 31 of 31 non-empty |
+| notes with literal `<b>` / `<i>` left in the text | 0 |
+| notes carrying a non-Gramps type name | 0 |
+| dangling `<noteref>` | 0 |
+| notes referenced by nothing | 0 |
+
+### Known limitations
+
+- **RM's `ShortFootnote` / `Footnote` / `Bibliography` are not
+  exported** (31 rows each). They are RootsMagic's *rendered* citation
+  strings, not source text — Gramps renders its own footnotes from the
+  citation's own fields. The export prints a count to stderr so the
+  omission is never silent. A researcher who wants RM's exact footnote
+  wording must re-render it from RM.
+- **Note handles are assigned in first-seen order** (`_g_n1`, `_g_n2`,
+  …), not derived from the note's content. Adding a note kind renumbers
+  every note after it, and a subset export renumbers differently from
+  a full one. The handle is not stable across exports.
+- `AddressTable.Note` and `MultimediaTable.Description` do **not**
+  become notes. Gramps has `Repository Note` and `Media Note` types for
+  them, but the v2.2 decision keeps `MultimediaTable.Description` in
+  `<file description>` (a #REQUIRED attribute of `<file>`), and
+  `AddressTable.Note` is empty in SampleTree, so the path is exercised
+  only by synthetic tests.
 - MediaType → MIME is hard-coded for 4 common types; others
   fall back to `application/octet-stream`.
 - `<confidence>2</confidence>` is hard-coded (no direct RM
   equivalent).
-- **Citation transcriptions are not exported.** `ActualText` /
-  `ShortFootnote` have no legal home on `<citation>` — Gramps models
-  them as a `<note>`. The export prints a count to stderr so the
-  omission is never silent; surfacing them as real notes is v3 work.
 - Repository `email` is dropped: the schema has no email child on
   `<repository>` (`resemail` belongs to the `<researcher>` header).
 - Unknown OwnerType values in `CitationLinkTable` /
   `MediaLinkTable` are warned once and skipped.
-
-Notes, media, and repositories from v2.2 land the rest of the
-plan-locked deferred slice. Any further work is v3+ (note
-styling, source templates, RM-internal OwnerType extensions,
-etc.).
+- `SourceTemplateTable` → Gramps name-formats is deferred; so are
+  RM-internal owner types 7 and 19, and `CitationLinkTable.Quality` →
+  `<confidence>` (RM's quality is a per-link scale, Gramps'
+  confidence is per-citation — they do not map).
 
 ## Install
 
@@ -81,18 +181,18 @@ Standard src-layout package. The CLI entry point
 ```sh
 # from the repository root — resolves the rmread dependency
 uv sync --all-packages --all-extras
-uv pip install -e tools/rm2gramps
+uv run rm2gramps --help
 
 # or, from inside tools/rm2gramps/ (pip resolves rmread from PyPI
 # once it is published there):
 pip install -e .
 ```
 
-`rm2gramps` depends on `rmread` for the SQLite open path, and declares
-it as a runtime dependency. Both are stdlib-only Python; no third-party
-packages. `rmread` is not yet on PyPI, so in a checkout the workspace
-root (`pyproject.toml` at the repository root) is what makes the
-dependency resolvable.
+`rm2gramps` depends on `rmread` for the SQLite open path and the
+shared markup dialect, and declares it as a runtime dependency. Both
+are stdlib-only Python; no third-party packages. `rmread` is not yet
+on PyPI, so in a checkout the workspace root (`pyproject.toml` at the
+repository root) is what makes the dependency resolvable.
 
 ## Usage
 
@@ -155,7 +255,7 @@ unless you script the library call.
 | Place | `_g_p<PlaceID>` | `P0001`, `P0002`, … |
 | Source | `_g_s<SourceID>` | `S0001`, `S0002`, … | (v2.1)
 | Citation | `_g_c<CitationID>` | `C0001`, `C0002`, … | (v2.1)
-| Note | `_g_n<note_id>` (synthesised) | `N0001`, `N0002`, … | (v2.2)
+| Note | `_g_n<note_id>` (synthesised, first-seen order) | `N0001`, `N0002`, … | (v2.2)
 | Media | `_g_o<MediaID>` | `O0001`, `O0002`, … | (v2.2)
 | Repository | `_g_r<AddressID>` | `R0001`, `R0002`, … | (v2.2)
 
@@ -183,24 +283,42 @@ src/rm2gramps/
     people.py            pure <person> renderer
     families.py          pure <family> renderer
     places.py            pure <placeobj> renderer
+    citations.py         pure <citation> renderer
+    sources.py           pure <source> renderer
+    notes.py             pure <note> renderer (type + <style>/<range>)
+    notes_dedup.py       note collection and (type, text) dedup
+    media.py             pure <object> renderer
+    repositories.py      pure <repository> renderer
+    citationrefs.py      pure <citationref> / <sourceref> helpers
+    schema_order.py      DTD child ordering (pure string transform)
     xml.py               <database> skeleton writer
     handles.py           stable handle / display-id derivation
     xmlutil.py           XML escape (the five predefined entities)
 ```
 
-Pure renderers (T4–T7) take dataclasses in, return strings out, and
-never touch sqlite3 — keeps them unit-testable without a live DB.
-`writer.py` (T9) is the SQL-walk layer that opens the `.rmtree`,
-runs the queries, and feeds the renderers.
+Pure renderers take dataclasses in, return strings out, and never touch
+sqlite3 — keeps them unit-testable without a live DB. `writer.py` is
+the SQL-walk layer that opens the `.rmtree`, runs the queries, and
+feeds the renderers.
+
+Two things about `writer.py` that are easy to break:
+
+- **The injection passes run in a fixed order** — `citationref`, then
+  `noteref`, then `objref`, then `reporef` — and each one seeds from
+  the *already-injected* lists, not the pre-injection originals.
+  Seeding from the originals silently discards every `<citationref>`.
+- **`reorder_children` runs last**, on every element. The DTD's child
+  order differs per element (`<person>` wants `objref` before
+  `noteref`; `<event>` wants it after), and injection can only ever
+  append at the end.
 
 ## Tests
 
-167 tests, all green (1 skipped — see below). Pure renderer tests
-need no fixture; writer and CLI tests use `SampleTree.rmtree` (RM
-11.0, 4.6 MB) at the repo root.
+199 tests. Pure renderer tests need no fixture; writer and CLI tests
+use `SampleTree.rmtree` (RM 11.0, 4.6 MB) at the repo root.
 
 ```sh
-python -m pytest tools/rm2gramps/tests/
+uv run pytest tools/rm2gramps/tests/
 ```
 
 The integration tests need the `SampleTree.rmtree` sample database. It
@@ -210,7 +328,7 @@ at it to run them:
 
 ```sh
 RM_SAMPLE_TREE=/path/to/SampleTree.rmtree \
-  python -m pytest tools/rm2gramps/tests/
+  uv run pytest tools/rm2gramps/tests/
 ```
 
 ### Schema conformance (`test_schema.py`)
@@ -261,9 +379,8 @@ at all, since `<file>` is mandatory inside one.
 
 Child order is no longer incidental: `schema_order.reorder_children`
 stably sorts each element's children into the DTD's sequence, because
-the order differs by element type (`<person>` wants `objref` before
-`<noteref>`; `<event>` wants it after) and the cross-reference
-injection pass could only ever append at the end.
+the order differs by element type and the cross-reference injection
+pass could only ever append at the end.
 
 ## Schema reference
 
@@ -273,9 +390,9 @@ is `example.gramps` at the repo root.
 
 ## Roadmap
 
-- v2: citations, sources, notes, media, repositories — `*LinkTable`
-  polymorphism walks, per-`OwnerType`. Slice decision deferred.
-- Possible: RM → Gramps export of RM's `<note>` field as Gramps
-  `<note>` (currently dropped in v1).
+- Possible: content-derived note handles (`_g_n` + 12 hex of the
+  sha256 of `type \0 text`) so handles survive a change in note kind.
+- Possible: `SourceTemplateTable` → Gramps name-formats.
+- Possible: `CitationLinkTable.Quality` → `<confidence>`.
 - Possible: handle-based `<eventref role="Primary">` audit — v1
   trusts RM's `IsPrimary` flag.

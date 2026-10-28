@@ -204,6 +204,13 @@ So the two repositories are expected to sit side by side:
 └── rm2gramps/    ← this repository
 ```
 
+Both are on GitHub — `tmills80/rmread` and `tmills80/rm2gramps`:
+
+```sh
+git clone https://github.com/tmills80/rmread.git
+git clone https://github.com/tmills80/rm2gramps.git
+```
+
 Delete that `[tool.uv.sources]` block once `rmread` is published and
 `dependencies = ["rmread>=0.0.1"]` can be resolved from an index.
 
@@ -401,6 +408,18 @@ RM column names, FactType IDs, and link-table semantics live in
 `docs/rm11-schema.md` of the **sibling `rmread` repository** — one
 source of truth for the RootsMagic schema, not a copy of it. The Gramps
 XML format reference is `example.gramps` at this repository's root.
+
+## Licence
+
+The rm2gramps source is MIT — see `LICENSE`.
+
+One file is **not** MIT: `tests/data/grampsxml.dtd` is a verbatim,
+unmodified copy of Gramps' own Document Type Definition and carries the
+GPL header from the Gramps project. It ships as a test fixture and
+contains no genealogy data — only element declarations. `tests/data/README.md`
+records where it came from and how to refresh it. The MIT licence covers
+the code in `src/`; the DTD stays under the GPL, and the two are kept
+separate.
 
 ## Roadmap
 

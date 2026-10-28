@@ -941,7 +941,7 @@ def export_database(
             linked_to_source_ids=keep_source_ids or None,
         )
 
-        # Build owner → media_id map for mediaref injection.
+        # Build owner → media_id map for objref injection.
         media_by_owner = media_owner_map(db.con)
 
         # Build source → repository_id map for reporef injection.
@@ -975,8 +975,8 @@ def export_database(
             aids = repo_by_source.get(source_id, [])
             return tuple(repository_handle(aid) for aid in aids)
 
-        # Apply <noteref> + <mediaref> + <reporef> injection across
-        # owner types. <noteref> → 6 owner types. <mediaref> →
+        # Apply <noteref> + <objref> + <reporef> injection across
+        # owner types. <noteref> → 6 owner types. <objref> →
         # Person / Source / Citation / Event. <reporef> → Source.
         #
         # These chain from the *already-injected* lists, not from the
@@ -1050,7 +1050,9 @@ def export_database(
             for xml, e in zip(event_strs, events)
         ]
 
-        # <reporef> on Citation only.
+        # <reporef> on Source only. AddressLinkTable.OwnerType=3
+        # references SourceIDs, and the DTD declares reporef* on
+        # <source> -- <citation> has no reporef child.
         source_strs = [
             _attach(
                 xml, "reporef",

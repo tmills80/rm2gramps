@@ -4,6 +4,8 @@ These are the first tests in the suite (T2). They are minimal and
 deliberately fail until `src/rm2gramps/handles.py` is written.
 """
 
+import hashlib
+
 from rm2gramps.handles import (
     citation_handle,
     event_handle,
@@ -53,8 +55,14 @@ def test_display_id_format_s_and_c() -> None:
     assert format_display_id(42, "C") == "C0042"
 
 
-def test_note_handle_from_id() -> None:
-    assert note_handle(7) == "_g_n7"
+def test_note_handle_from_content_key() -> None:
+    """A note handle is derived from the note's content, not its id.
+
+    The key is the sha256 of ``f"{type}\\0{text}"`` — the same key
+    the inline-note dedup uses.
+    """
+    key = hashlib.sha256(b"Person Note\\x00A research note.").hexdigest()
+    assert note_handle(key) == "_g_n" + key[:12]
 
 
 def test_media_handle_from_id() -> None:

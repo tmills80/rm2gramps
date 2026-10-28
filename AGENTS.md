@@ -122,6 +122,12 @@ Three rules the code enforces and the tests pin:
 - **Note dedup key is `(type, text)`**, not text alone — sha256 of
   `f"{note_type}\0{text}"`. The same string under two Gramps note types
   is two notes.
+- **Note handles are content-derived**: `_g_n` + the first 12 hex of
+  that same key. A note keeps its handle across a subset export and
+  across a change in note kind; the *display id* (`N0001`) is
+  sequential, per-export, and must not be used to identify a note
+  between two files. The key and the handle are derived in one place
+  (`notes.note_key`) so they cannot drift apart.
 
 ## Layout
 

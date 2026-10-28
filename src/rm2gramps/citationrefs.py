@@ -78,7 +78,7 @@ def inject_refs(
         The child element name to inject (e.g. ``"noteref"``,
         ``"objref"``, ``"reporef"``).
     hlink_values
-        Tuple of full Gramps handles (e.g. ``"_g_n1"``,
+        Tuple of full Gramps handles (e.g. ``"_g_nab12cd34ef56"``,
         ``"_g_o2"``, ``"_g_r3"``). Empty tuple returns ``xml``
         unchanged.
 

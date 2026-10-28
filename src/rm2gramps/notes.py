@@ -31,6 +31,7 @@ would be off by one after the first line break.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 
 from rmread.rmtext import plain_text
@@ -54,7 +55,12 @@ class NoteRecord:
     """One synthesised note.
 
     ``note_id`` is a writer-assigned integer (1..N in first-seen
-    order of unique notes). ``note_type`` is a Gramps type name from
+    order of unique notes). It drives the *display id* (``N0001``) and
+    the export order — it is not part of the note's identity. The
+    identity is the content: the handle is derived from
+    :func:`note_key` of ``(note_type, text)``.
+
+    ``note_type`` is a Gramps type name from
     ``notes_dedup.GRAMPS_NOTE_TYPES``' vocabulary. ``text`` is the
     raw RootsMagic text; the markup in it is resolved here.
     """
@@ -62,6 +68,22 @@ class NoteRecord:
     note_id: int
     text: str
     note_type: str = "General"
+
+
+def note_key(note_type: str, text: str) -> str:
+    """The identity key of a note: sha256 of ``type \\0 text``.
+
+    The type is part of the key because it is part of the note's
+    identity — the same words as a "Citation" and as a "Source text"
+    are two different notes in Gramps, and must not collapse into one
+    or share a handle.
+
+    The same key drives the dedup (``notes_dedup.load_notes``) and the
+    handle (``handles.note_handle``), so the two cannot drift apart.
+    """
+    return hashlib.sha256(
+        f"{note_type}\0{text}".encode("utf-8")
+    ).hexdigest()
 
 
 def _style_elements(spans: tuple[Span, ...]) -> list[str]:
@@ -112,7 +134,7 @@ def render_note_xml(rec: NoteRecord, *, change: int) -> str:
     """
     if not rec.text:
         return ""
-    handle = note_handle(rec.note_id)
+    handle = note_handle(note_key(rec.note_type, rec.text))
     display = format_display_id(rec.note_id, "N")
 
     resolved = plain_text(rec.text)

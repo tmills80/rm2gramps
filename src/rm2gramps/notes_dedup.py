@@ -13,6 +13,10 @@ a note's identity. "Only father" exists in SampleTree as both a
 ``Citation`` and a ``Source text``; collapsing them would give one of
 the two the wrong Gramps type.
 
+The key function itself lives in :mod:`rm2gramps.notes` — the
+renderer — because it also derives the note's *handle*. One key, one
+derivation, no drift.
+
 Why sha256: stable, collision-resistant for text under ~100KB.
 The Plan-locked caveat applies — two byte-identical notes of the
 same type collapse to one <note>. Researcher can split in Gramps.
@@ -23,10 +27,10 @@ inline on every owner table".
 
 from __future__ import annotations
 
-import hashlib
 import sqlite3
 
-from .notes import NoteRecord
+from .handles import note_handle
+from .notes import NoteRecord, note_key
 
 #: RM note-bearing column → Gramps note type name.
 #:
@@ -50,18 +54,6 @@ GRAMPS_NOTE_TYPES: dict[str, str] = {
     "CitationTable.Comments": "Citation",
     "CitationTable.ActualText": "Source text",
 }
-
-def note_key(note_type: str, text: str) -> str:
-    """The dedup key for a note: its type and its text.
-
-    The type is part of the key because it is part of the note's
-    identity — the same words as a "Citation" and as a "Source text"
-    are two different notes in Gramps.
-    """
-    return hashlib.sha256(
-        f"{note_type}\0{text}".encode("utf-8")
-    ).hexdigest()
-
 
 def _collect_table_notes(
     con: sqlite3.Connection,
@@ -147,6 +139,7 @@ def load_notes(
     """
     notes_by_id: dict[int, NoteRecord] = {}
     key_to_id: dict[str, int] = {}
+    handle_to_key: dict[str, str] = {}
     next_id = 1
 
     # Each entry: (table, note_column, owner_column, owner_id_filter)
@@ -184,6 +177,19 @@ def load_notes(
             if not stripped:
                 continue
             key = note_key(note_type, stripped)
+            # The handle is derived from the key, truncated to 48 bits.
+            # Two distinct notes must never land on the same handle —
+            # Gramps would merge them on import. Astronomically
+            # unlikely, but "no silent failure" cuts both ways: if it
+            # happens, say so rather than emit a corrupt export.
+            handle = note_handle(key)
+            if handle in handle_to_key and handle_to_key[handle] != key:
+                raise ValueError(
+                    f"note handle collision: two distinct notes derive the "
+                    f"handle {handle!r} (keys "
+                    f"{handle_to_key[handle][:12]}… and {key[:12]}…)"
+                )
+            handle_to_key[handle] = key
             if key not in key_to_id:
                 key_to_id[key] = next_id
                 notes_by_id[next_id] = NoteRecord(
@@ -197,21 +203,20 @@ def load_notes(
     return notes_by_id, key_to_id
 
 
-def note_ids_for_texts(
+def note_handles_for_texts(
     texts: list[str],
     key_to_id: dict[str, int],
     *,
     note_type: str,
-) -> list[int]:
-    """Resolve owner note texts to synthesised note_ids.
+) -> list[str]:
+    """Resolve owner note texts to their Gramps handles.
 
     Used by the writer when attaching <noteref> children to an
     owner element. For each non-empty text, key it the same way
-    as :func:`load_notes` and look up the resulting id in
-    ``key_to_id``. Texts whose key isn't in the map (because they
-    weren't loaded for some reason) are skipped — defensive
-    against the writer's export scope having changed between
-    loading and rendering.
+    as :func:`load_notes` and derive the handle from that key.
+    Texts whose key isn't in the map (because they weren't loaded
+    for some reason) are skipped — defensive against the writer's
+    export scope having changed between loading and rendering.
 
     Parameters
     ----------
@@ -219,26 +224,26 @@ def note_ids_for_texts(
         Note text strings from a single owner (e.g. one Person's
         ``Note`` column plus any per-name notes).
     key_to_id
-        The key → id map from :func:`load_notes`.
+        The key → id map from :func:`load_notes`. Used only to check
+        that the note was loaded; the handle comes from the key.
     note_type
         The Gramps type name for these texts. Part of the key, so
         it must match what ``load_notes`` used.
 
     Returns
     -------
-    list[int]
-        Note_ids, one per unique note text. Duplicates within
-        ``texts`` produce duplicate ids in the output (Gramps
+    list[str]
+        Note handles, one per unique note text. Duplicates within
+        ``texts`` produce duplicate handles in the output (Gramps
         handles multiple noterefs to the same note fine; we
         don't dedup here because the writer is responsible for
         not calling this with overlapping texts).
     """
-    out: list[int] = []
+    out: list[str] = []
     for text in texts:
         if not text or not text.strip():
             continue
         key = note_key(note_type, text.strip())
-        nid = key_to_id.get(key)
-        if nid is not None:
-            out.append(nid)
+        if key in key_to_id:
+            out.append(note_handle(key))
     return out

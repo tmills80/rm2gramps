@@ -74,6 +74,12 @@ Rules that the code enforces and the tests pin:
   is two notes. Gramps' `type` attribute is matched case-sensitively, so
   the types must be Gramps' exact English names ("Person Note", "Source
   text"), not "general".
+- **Note handles are content-derived**: `_g_n` + the first 12 hex of
+  that same key. A note keeps its handle across a subset export and
+  across a change in note kind; the *display id* (`N0001`) is
+  sequential, per-export, and must not be used to identify a note
+  between two files. The key and the handle are derived in one place
+  (`notes.note_key`) so they cannot drift apart.
 - `--person-ids` narrows everything transitively — citations, sources,
   media, repositories, notes, places. `--person-ids 999999` must emit
   zero people *and* zero families.

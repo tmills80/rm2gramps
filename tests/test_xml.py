@@ -18,7 +18,7 @@ from __future__ import annotations
 from rm2gramps.xml import write_database
 
 
-def _capture(*, header_date: str = "2026-01-01", version: str = "rm2gramps/0.0.1",
+def _capture(*, header_date: str = "2026-01-01", version: str = "rm2gramps/0.1.0",
              events: tuple[str, ...] = (),
              people: tuple[str, ...] = (),
              families: tuple[str, ...] = (),
@@ -52,7 +52,7 @@ def test_writer_emits_required_root_attributes() -> None:
     assert '<database xmlns="http://gramps-project.org/xml/1.7.2/">' in xml
     # Header
     assert '<header>' in xml
-    assert '<created date="2026-01-01" version="rm2gramps/0.0.1"/>' in xml
+    assert '<created date="2026-01-01" version="rm2gramps/0.1.0"/>' in xml
     assert '<researcher/>' in xml
 
 
@@ -106,7 +106,7 @@ def test_writer_returns_bytes_with_utf8_encoding() -> None:
     """write_database returns bytes (UTF-8 encoded), not str."""
     out = write_database(
         header_date="2026-01-01",
-        version="rm2gramps/0.0.1",
+        version="rm2gramps/0.1.0",
         events=(),
         people=(),
         families=(),
@@ -116,7 +116,7 @@ def test_writer_returns_bytes_with_utf8_encoding() -> None:
     # Round-trip a non-ASCII name to prove UTF-8 (not latin-1).
     out2 = write_database(
         header_date="2026-01-01",
-        version="rm2gramps/0.0.1",
+        version="rm2gramps/0.1.0",
         events=(),
         people=('<person handle="_g_xx" change="0" id="I0001">'
                 '<gender>U</gender>'

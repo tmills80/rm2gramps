@@ -9,12 +9,18 @@ Handle scheme:
 - Event:  ``"_g_e" + str(EventID)``
 - Family: ``"_g_f" + str(FamilyID)``
 - Place:  ``"_g_p" + str(PlaceID)``
+- Note:   ``"_g_n" + 12 hex of the note's content key``
 
 Display id scheme: zero-padded 4-digit decimal prefixed by letter
 (``"I0001"``, ``"E0123"``). Mirrors Gramps' own export format.
 """
 
 from __future__ import annotations
+
+#: Number of hex characters of a note's content key that go into its
+#: handle. 12 hex characters is 48 bits — ample for the note counts a
+#: single tree carries, and short enough to read in a diff.
+NOTE_HANDLE_HEX = 12
 
 
 def person_handle(unique_id: str) -> str:
@@ -47,9 +53,16 @@ def citation_handle(citation_id: int) -> str:
     return f"_g_c{citation_id}"
 
 
-def note_handle(note_id: int) -> str:
-    """Derive a Gramps handle from a synthesised NoteID. (v2.2)"""
-    return f"_g_n{note_id}"
+def note_handle(note_key: str) -> str:
+    """Derive a Gramps handle from a note's content key. (v3.1)
+
+    The key is the sha256 of ``f"{note_type}\\0{text}"`` — the same
+    key the inline-note dedup uses. Deriving the handle from the
+    content rather than from the note's position in the export means
+    a note keeps its identity when the export is re-sorted, narrowed
+    to a subset, or gains a new note kind before it.
+    """
+    return "_g_n" + note_key[:NOTE_HANDLE_HEX]
 
 
 def media_handle(media_id: int) -> str:

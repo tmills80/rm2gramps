@@ -13,11 +13,12 @@ fact-type vocabulary, full citation detail, multimedia links, and
 the full place hierarchy. This tool goes directly from `.rmtree` to
 `.gramps` and preserves all of that.
 
-## Status: v3
+## Status: v3.1
 
-v3 ships all nine Gramps object types that `.gramps` supports, with
+v3.1 ships all nine Gramps object types that `.gramps` supports, with
 notes that mean what Gramps means by a note — right type, real
-transcriptions, and RootsMagic's markup carried across as style ranges.
+transcriptions, and RootsMagic's markup carried across as style ranges
+— and with note handles that survive a change in the export.
 
 | Version | Adds |
 |---|---|
@@ -26,6 +27,31 @@ transcriptions, and RootsMagic's markup carried across as style ranges.
 | v2.2 | notes, media, repositories |
 | v2.3 | schema conformance fix against the Gramps DTD |
 | v3 | typed notes, transcriptions, styling |
+| v3.1 | content-derived note handles |
+
+### v3.1 — content-derived note handles
+
+A note's handle used to be `_g_n<note_id>`, with the id assigned in
+first-seen order. That made the handle a property of the *export*,
+not of the note: adding a note kind renumbered every note after it,
+and a `--person-ids` subset renumbered its notes differently from the
+full tree. Two exports of the same tree could not be diffed against
+each other — a changed note and a moved note looked identical.
+
+The handle is now derived from the note's content, using the same
+key the dedup already used:
+
+```
+handle = "_g_n" + sha256(f"{note_type}\0{text}").hexdigest()[:12]
+```
+
+The type is in the key because it is part of the note's identity — the
+same words as a "Citation" and as a "Source text" are two different
+notes in Gramps, and get two different handles.
+
+The display id (`N0001`) is still sequential and still per-export: it
+is a label, nothing references it, and Gramps renumbers on import.
+The handle is the identity.
 
 ### v3 — note types, transcriptions, styling
 
@@ -150,10 +176,12 @@ Full `SampleTree.rmtree` export, checked against the vendored DTD:
   citation's own fields. The export prints a count to stderr so the
   omission is never silent. A researcher who wants RM's exact footnote
   wording must re-render it from RM.
-- **Note handles are assigned in first-seen order** (`_g_n1`, `_g_n2`,
-  …), not derived from the note's content. Adding a note kind renumbers
-  every note after it, and a subset export renumbers differently from
-  a full one. The handle is not stable across exports.
+- **Note display ids are assigned in first-seen order** (`N0001`,
+  `N0002`, …) and are therefore per-export: a subset export numbers
+  its notes differently from a full one, and adding a note kind
+  renumbers every note after it. The *handle* is content-derived and
+  stable across exports — use it, not the display id, to identify a
+  note between two files.
 - `AddressTable.Note` and `MultimediaTable.Description` do **not**
   become notes. Gramps has `Repository Note` and `Media Note` types for
   them, but the v2.2 decision keeps `MultimediaTable.Description` in
@@ -275,7 +303,7 @@ unless you script the library call.
 | Place | `_g_p<PlaceID>` | `P0001`, `P0002`, … |
 | Source | `_g_s<SourceID>` | `S0001`, `S0002`, … | (v2.1)
 | Citation | `_g_c<CitationID>` | `C0001`, `C0002`, … | (v2.1)
-| Note | `_g_n<note_id>` (synthesised, first-seen order) | `N0001`, `N0002`, … | (v2.2)
+| Note | `_g_n<12 hex of the note's content key>` | `N0001`, `N0002`, … | (v3.1)
 | Media | `_g_o<MediaID>` | `O0001`, `O0002`, … | (v2.2)
 | Repository | `_g_r<AddressID>` | `R0001`, `R0002`, … | (v2.2)
 
@@ -423,8 +451,6 @@ separate.
 
 ## Roadmap
 
-- Possible: content-derived note handles (`_g_n` + 12 hex of the
-  sha256 of `type \0 text`) so handles survive a change in note kind.
 - Possible: `SourceTemplateTable` → Gramps name-formats.
 - Possible: `CitationLinkTable.Quality` → `<confidence>`.
 - Possible: handle-based `<eventref role="Primary">` audit — v1

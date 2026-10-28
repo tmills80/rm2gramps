@@ -41,7 +41,6 @@ from .families import ChildRef, FamilyRecord, render_family_xml
 from .handles import (
     citation_handle,
     media_handle,
-    note_handle,
     repository_handle,
     source_handle,
 )
@@ -50,7 +49,7 @@ from .notes import render_note_xml
 from .notes_dedup import (
     GRAMPS_NOTE_TYPES,
     load_notes,
-    note_ids_for_texts,
+    note_handles_for_texts,
 )
 from .people import NameRecord, PersonRecord, render_person_xml
 from .places import PlaceRecord, render_place_xml
@@ -953,14 +952,14 @@ def export_database(
             owner_id: int,
         ) -> tuple[str, ...]:
             entries = note_texts_by_owner.get(owner_type, {}).get(owner_id, [])
-            nids: list[int] = []
+            handles: list[str] = []
             for note_type, text in entries:
-                nids.extend(
-                    note_ids_for_texts(
+                handles.extend(
+                    note_handles_for_texts(
                         [text], hash_to_id, note_type=note_type,
                     )
                 )
-            return tuple(note_handle(nid) for nid in nids)
+            return tuple(handles)
 
         def _objref_for_owner(
             owner_type: int,
@@ -1073,7 +1072,7 @@ def export_database(
         # <event> wants it after).
         return write_database(
             header_date=header_date,
-            version="rm2gramps/0.0.1",
+            version="rm2gramps/0.1.0",
             events=tuple(reorder_children(x) for x in event_strs),
             people=tuple(reorder_children(x) for x in people_strs),
             families=tuple(reorder_children(x) for x in family_strs),

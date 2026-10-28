@@ -12,15 +12,18 @@ T22 cases from ``plans/v2.2-notes-media-repositories.md``
 
 from __future__ import annotations
 
-from rm2gramps.notes import NoteRecord, render_note_xml
+from rm2gramps.handles import note_handle
+from rm2gramps.notes import NoteRecord, note_key, render_note_xml
 
 
 def test_note_minimum() -> None:
     """Single non-empty text → minimum <note>."""
     rec = NoteRecord(note_id=1, text="Free-form research note.", note_type="general")
     xml = render_note_xml(rec, change=1700000000)
+    handle = note_handle(note_key("general", "Free-form research note."))
     assert xml == (
-        '<note handle="_g_n1" change="1700000000" id="N0001" type="general">'
+        f'<note handle="{handle}" change="1700000000" id="N0001" '
+        'type="general">'
         "<text>Free-form research note.</text>"
         "</note>"
     )
@@ -71,8 +74,8 @@ def test_note_idempotent_for_same_text() -> None:
     b = render_note_xml(rec_b, change=1)
 
     # Strip the per-record handle / id so we can compare the rest.
-    a_norm = re.sub(r'handle="_g_n\d+"', 'handle="X"', a)
+    a_norm = re.sub(r'handle="_g_n[0-9a-f]+"', 'handle="X"', a)
     a_norm = re.sub(r'id="N\d+"', 'id="X"', a_norm)
-    b_norm = re.sub(r'handle="_g_n\d+"', 'handle="X"', b)
+    b_norm = re.sub(r'handle="_g_n[0-9a-f]+"', 'handle="X"', b)
     b_norm = re.sub(r'id="N\d+"', 'id="X"', b_norm)
     assert a_norm == b_norm

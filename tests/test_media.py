@@ -1,6 +1,6 @@
 """Tests for rm2gramps.media — MultimediaTable row → <object> element.
 
-T23 cases from ``tools/rm2gramps/plans/v2.2-notes-media-repositories.md``
+T23 cases from ``plans/v2.2-notes-media-repositories.md``
 § T23:
 
 - minimum: MediaID + MediaFile + MediaPath + MediaType=1 (image) →

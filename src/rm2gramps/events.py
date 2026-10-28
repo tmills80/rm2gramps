@@ -10,7 +10,7 @@ sortable ``SortDate`` integer (e.g. ``18400612``). We trust SortDate
 and emit ISO ``YYYY-MM-DD`` in the <dateval>. When SortDate is zero
 (or None), we omit the <dateval> entirely; the raw text is dropped
 (unparseable fuzzy dates like ``"BEF 1840"`` are not handled in v1
-— see ``tools/rm2gramps/plans/rm2gramps.md`` § "Risks").
+— see ``plans/rm2gramps.md`` § "Risks").
 
 Place handling: PlaceID=0 means "no place recorded" and we omit the
 <place> child. Real place linkage uses the Gramps handle derived by

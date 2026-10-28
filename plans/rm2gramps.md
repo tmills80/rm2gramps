@@ -3,6 +3,10 @@
 > **For Hermes:** Use the `plan` skill and `test-driven-development` skill to
 > implement this plan task-by-task. Each task is one bounded change with a
 > failing test first, a green commit second.
+>
+> **Status:** v3 shipped (see `README.md`). This plan's body describes the
+> state before later slices; read the dated **Changed** notes before
+> trusting a claim it makes.
 
 **Goal:** convert a RootsMagic 11 SQLite database into a Gramps XML 1.7.2
 `.gramps` file (gzipped by default, matching how Gramps itself writes them).
@@ -28,7 +32,7 @@ deterministic (same handle scheme across runs), and (c) keep the tool
 testable with stdlib `xml.etree.ElementTree` rather than a Gramps install.
 
 **Tech stack:** Python 3.12+, standard library only.
-- `sqlite3` (with `RMNOCASE` collation registered — see `tools/rmread/docs/rm11-schema.md` § "The `RMNOCASE` collation")
+- `sqlite3` (with `RMNOCASE` collation registered — see `rmread/docs/rm11-schema.md` § "The `RMNOCASE` collation")
 - `xml.etree.ElementTree` (writer + reader for round-trip tests)
 - `gzip`
 - `dataclasses`, `argparse`, `pathlib`
@@ -47,7 +51,7 @@ familysearch-sync, payloads, group ranges.
 4 (people, events, families, places). The deferred items all live in
 RM's link-table polymorphism (`*LinkTable` with `(OwnerType, OwnerID)`)
 and getting them right requires per-link, per-`OwnerType` semantics
-(see `tools/rmread/docs/rm11-schema.md` § "Conventions every `*LinkTable`
+(see `rmread/docs/rm11-schema.md` § "Conventions every `*LinkTable`
 shares"). That's a follow-up commit with its own slice decision; v1
 should not block on it.
 
@@ -71,14 +75,19 @@ src/rm2gramps/
     xml.py               # the top-level writer producing the full <database>
 
 tests/                  # pytest, one file per module
-docs/README.md          # one-page usage guide
+README.md               # one-page usage guide
 pyproject.toml
 ```
 
-Single-import boundary: nothing in `rm2gramps/` imports from `rmread/`.
-We depend on `rmread`'s *schema knowledge* (column names, FactType IDs)
-but query SQLite ourselves so a future refactor of `rmread` doesn't
-silently break the export.
+**Changed 2026-10-28.** The "single-import boundary" this plan
+originally claimed — nothing in `rm2gramps/` imports from `rmread/` —
+no longer holds. The tool now imports `rmread` at runtime:
+`rmread.open_database` for the SQLite open path, `rmread.linktables`
+for the `*LinkTable` walkers (commit `cf2fec9`, "rm2gramps consumes
+rmread.linktables; local walkers deleted"), and `rmread.rmtext` for the
+shared RootsMagic markup dialect. `rmread` lives in a **separate
+repository** now, and its `docs/rm11-schema.md` is the single source of
+truth for column names and FactType IDs — not a copy in this repo.
 
 ## Identity stability
 
@@ -205,8 +214,8 @@ parallelised after events.
 
 ### T1. Scaffolding
 
-- Create `tools/rm2gramps/` with `pyproject.toml`, `src/rm2gramps/`,
-  `tests/`, `docs/`. Mirror `tools/rmread/` layout exactly.
+- Create the project root with `pyproject.toml`, `src/rm2gramps/`,
+  `tests/`, `docs/`. Mirror `rmread/` layout exactly.
 - `pyproject.toml`: `name = "rm2gramps"`, `version = "0.0.1"`,
   `requires-python = ">=3.12"`, `dependencies = []`,
   entry point `rm2gramps = "rm2gramps.cli.export:main"`.
@@ -231,7 +240,7 @@ Tests in `tests/test_db.py`:
 - `test_rmnocase_registered` — open `SampleTree.rmtree`, run a query
   that hits a `RMNOCASE`-collated column (`AddressTable` COUNT), no
   error. This is the regression test for the bug noted in
-  `tools/rmread/docs/rm11-schema.md` § "Verified-in-this-DB caveats"
+  `rmread/docs/rm11-schema.md` § "Verified-in-this-DB caveats"
   item 3.
 - `test_open_rejects_non_rmtree` — feeding a random SQLite file
   raises `SchemaError`.
@@ -376,13 +385,13 @@ This is the round-trip test. If this passes, the v1 tool is shippable.
    on most events, pointing to `<citation>` objects. RM has
    `CitationLinkTable` joining events to citations via
    `(OwnerType, OwnerID)` (and the right `OwnerType` for event→citation
-   is event-dependent — see `tools/rmread/docs/rm11-schema.md` §
+   is event-dependent — see `rmread/docs/rm11-schema.md` §
    "Citation, source, multimedia, address, URL"). **v1 drops
    citations;** v2 walks `CitationLinkTable` per `OwnerType`.
 
 ## Source
 
-Mirrors the structure of `tools/rmread/docs/rm11-schema.md`. That doc
+Mirrors the structure of `rmread/docs/rm11-schema.md`. That doc
 is the schema reference; this one is the *tool* reference.
 
 The example XML output (`example.gramps` at repo root) is the format
@@ -393,10 +402,10 @@ miss.
 
 ## Done means
 
-- `python -m pytest tools/rm2gramps/tests/` is green.
+- `python -m pytest tests/` is green.
 - `rm2gramps SampleTree.rmtree /tmp/SampleTree.gramps` produces a
   valid `.gramps` that opens in Gramps without error.
 - Two consecutive runs produce byte-equal (after gunzip) XML.
-- `tools/rm2gramps/docs/README.md` exists with a one-page usage guide.
-- `tools/rm2gramps/pyproject.toml` entry-point installs cleanly into
+- `README.md` exists with a one-page usage guide.
+- `pyproject.toml` entry-point installs cleanly into
   the rmread venv (it's the same Python; both use stdlib-only).

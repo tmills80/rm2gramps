@@ -6,7 +6,7 @@ Source / Place / Citation, dedup by sha256 of the text, return
 ``(notes_by_id, hash_to_id)`` so the writer can attach
 ``<noteref>`` children to owners.
 
-Schema reference: ``tools/rmread/docs/rm11-schema.md``. RM stores
+Schema reference: ``rmread/docs/rm11-schema.md``. RM stores
 notes inline on each table — there is no separate NoteTable.
 
 Tests run against ``SampleTree.rmtree`` (RM 11.0, 4.6 MB).

@@ -63,7 +63,7 @@ class MediaRecord:
 
     Full row population (``Thumbnail`` BLOB, ``RefNumber``,
     ``UTCModDate``, etc.) is out of scope for v2.2 — see
-    ``tools/rm2gramps/plans/v2.2-notes-media-repositories.md`` §
+    ``plans/v2.2-notes-media-repositories.md`` §
     "Architecture".
     """
 

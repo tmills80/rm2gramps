@@ -1,6 +1,6 @@
 """Tests for rm2gramps.xml — top-level <database> writer.
 
-T8 cases from ``tools/rm2gramps/plans/rm2gramps.md`` § T8:
+T8 cases from ``plans/rm2gramps.md`` § T8:
 
 - writer emits the required root attributes (xmlns + version + the
   correct DTD / encoding prolog) and a <header> with <created> and

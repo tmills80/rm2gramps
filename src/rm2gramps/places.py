@@ -27,7 +27,7 @@ class PlaceRecord:
 
     Full row population (PlaceType, MasterID, lat/long, etc.) is
     intentionally out of scope for v1 — see
-    ``tools/rm2gramps/plans/rm2gramps.md`` § "Slice decision".
+    ``plans/rm2gramps.md`` § "Slice decision".
     """
 
     place_id: int

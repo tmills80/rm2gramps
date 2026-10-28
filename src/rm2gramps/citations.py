@@ -53,7 +53,7 @@ class CitationRecord:
 
     Full row population (``Comments``, ``Fields`` BLOB,
     ``UTCModDate``, etc.) is out of scope for v2.1 — see
-    ``tools/rm2gramps/plans/v2.1-citations-and-sources.md`` §
+    ``plans/v2.1-citations-and-sources.md`` §
     "Architecture".
     """
 

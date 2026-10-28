@@ -12,8 +12,8 @@ dependencies = ["rmread>=0.0.1"]
 
 [project.optional-dependencies]
 # Test-only. rmread is a runtime dependency of this tool already; the
-# group exists so `pip install -e tools/rm2gramps[test]` pulls in the
-# test runner alongside it.
+# group exists so `pip install -e ".[test]"` pulls in the test runner
+# alongside it.
 test = [
     "pytest>=8",
 ]
@@ -23,6 +23,12 @@ rm2gramps = "rm2gramps.cli.export:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.uv.sources]
+# rmread is not on PyPI. Until it is published, resolve it from the
+# sibling checkout. Delete this block once rmread is released and
+# `dependencies = ["rmread>=0.0.1"]` can be resolved from an index.
+rmread = { path = "../rmread", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

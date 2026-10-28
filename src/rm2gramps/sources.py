@@ -37,7 +37,7 @@ class SourceRecord:
 
     Full row population (``Fields`` BLOB, ``TemplateID``,
     ``UTCModDate``, etc.) is out of scope for v2.1 — see
-    ``tools/rm2gramps/plans/v2.1-citations-and-sources.md`` §
+    ``plans/v2.1-citations-and-sources.md`` §
     "Architecture" for what gets surfaced.
     """
 

@@ -17,7 +17,7 @@ Why sha256: stable, collision-resistant for text under ~100KB.
 The Plan-locked caveat applies — two byte-identical notes of the
 same type collapse to one <note>. Researcher can split in Gramps.
 
-Schema reference: ``tools/rmread/docs/rm11-schema.md`` §"Notes
+Schema reference: ``rmread/docs/rm11-schema.md`` §"Notes
 inline on every owner table".
 """
 

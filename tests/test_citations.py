@@ -1,6 +1,6 @@
 """Tests for rm2gramps.citations — CitationTable row → <citation> element.
 
-T13 cases from ``tools/rm2gramps/plans/v2.1-citations-and-sources.md``
+T13 cases from ``plans/v2.1-citations-and-sources.md``
 § T13:
 
 - minimum (CitationID + SourceID → sourceref)

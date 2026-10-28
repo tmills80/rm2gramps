@@ -1,6 +1,6 @@
 """Tests for rm2gramps.events — EventTable row → <event> element.
 
-T4 covers five cases from ``tools/rm2gramps/plans/rm2gramps.md`` § T4:
+T4 covers five cases from ``plans/rm2gramps.md`` § T4:
 
 - birth event minimum (the canonical happy path)
 - unknown fact type renders as ``Unknown(N)``

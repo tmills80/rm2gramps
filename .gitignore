@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# RootsMagic databases never go in git.
+*.rmtree
+*.rmgc
+
+# Emacs org / markdown HTML exports — keep source, ignore render.
+*.html
+
+# Real Gramps exports and databases of the maintainer's family tree.
+# Untracked is not enough — `git add -A` would stage them.
+*.gramps
+gramps-example-db/
+
+# Build artefacts
+build/
+dist/

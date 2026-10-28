@@ -569,7 +569,7 @@ def test_load_people_handles_person_with_nothing(synthetic_people) -> None:
 
 # --- narrowing invariants -----------------------------------------------
 #
-# docs/README.md claims `--person-ids` narrows *everything*
+# README.md claims `--person-ids` narrows *everything*
 # transitively. These tests pin that for each object type. They use
 # strict `<` — an earlier version asserted `<=`, which passes when
 # narrowing is entirely absent (subset == full) and so hid the bug.

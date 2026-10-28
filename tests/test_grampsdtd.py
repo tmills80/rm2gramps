@@ -26,15 +26,22 @@ GRAMPS_NS = "http://gramps-project.org/xml/1.7.2/"
 
 # Optional: when a real Gramps export is present locally (it is not
 # committed), use it as the control in preference to the synthetic one.
-# It is looked for beside the tests and at the repository root, because
-# that is where it has been kept; the path is resolved at runtime so it
-# holds wherever the package is checked out.
+# It is looked for beside the tests and in each directory above them,
+# because that is where it has been kept — the repository root in a
+# monorepo checkout, the project root once this tool stands alone. The
+# search is by directory depth, not by a fixed number of parents, so it
+# holds in both layouts.
+_SEARCH_DEPTH = 4
+
 EXAMPLE = next(
     (
         candidate
         for candidate in (
             Path(__file__).parent / "data" / "example.gramps",
-            Path(__file__).resolve().parents[3] / "example.gramps",
+            *(
+                directory / "example.gramps"
+                for directory in Path(__file__).resolve().parents[:_SEARCH_DEPTH]
+            ),
         )
         if candidate.exists()
     ),

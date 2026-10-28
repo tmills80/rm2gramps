@@ -1,6 +1,6 @@
 """Tests for rm2gramps.citations_walk — CitationLinkTable walker.
 
-T14 cases from ``tools/rm2gramps/plans/v2.1-citations-and-sources.md``
+T14 cases from ``plans/v2.1-citations-and-sources.md``
 § T14:
 
 - walker returns a dict mapping owner-type → owner-id → citation-ids,

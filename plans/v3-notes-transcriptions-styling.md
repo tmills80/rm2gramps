@@ -47,7 +47,7 @@ exact footnote wording must re-render it from RM.
 `rm2gramps` already sit downstream of, and the dialect is a fact about
 the RootsMagic file format — `rmread`'s subject.
 
-New module `tools/rmread/src/rmread/rmtext.py`:
+New module `rmread/src/rmread/rmtext.py`:
 
 | Function | Purpose | Consumer |
 |---|---|---|
@@ -64,15 +64,15 @@ dependency on `rmread`. `rmread` is stdlib-only, so the dependency is
 cheap, and `rmread` must be published before `rmcite` installs
 standalone — already true of `rm2gramps`, which depends on `rmread` at
 runtime today. `plans/repo-split.md` §2 records the dependency graph
-and needs updating, as do `tools/cite/README.org`,
-`tools/cite/DEVELOPMENT.org` and `tools/cite/src/rmcite/contract.py`
+and needs updating, as do `rmcite/README.org`,
+`rmcite/DEVELOPMENT.org` and `rmcite/src/rmcite/contract.py`
 (which says "it never imports rmread" — true of the *version constant*,
 which stays a deliberate copy; no longer true of the package).
 
 **The rm-dump version copy stays a copy.** `rmcite.contract`'s
 `SUPPORTED_SCHEMA_VERSION` remains a literal, not an import, so a newer
 `rmread` cannot silently widen what `rmcite` accepts. The guard test in
-`tools/cite/tests/test_contract.py` keeps doing that job.
+`rmcite/tests/test_contract.py` keeps doing that job.
 
 ## Six locked decisions
 
@@ -161,13 +161,13 @@ which stays a deliberate copy; no longer true of the package).
 
 ## Schema reference
 
-`tools/rmread/docs/rm11-schema.md` — notes are inline columns, not a
+`rmread/docs/rm11-schema.md` — notes are inline columns, not a
 table; `SourceTable` / `CitationTable` carry `ActualText` (the
 transcription) alongside `Comments` (the researcher's comment);
 `MultimediaTable` carries `Description` and `Caption`; `AddressTable`
 carries `Note`.
 
-Gramps 1.7.2 DTD (`tools/rm2gramps/tests/data/grampsxml.dtd`):
+Gramps 1.7.2 DTD (`tests/data/grampsxml.dtd`):
 
 ```
 <!ELEMENT note (text, style*, tagref*)>
@@ -227,13 +227,13 @@ that round-trips.
 
 | Module | Change |
 |---|---|
-| `tools/rmread/src/rmread/rmtext.py` | **new** — shared dialect: `tokenize`, `plain_text`, `normalize_newlines` |
-| `tools/rmread/tests/test_rmtext.py` | **new** — dialect tests |
-| `tools/cite/src/rmcite/parser.py` | rebuild on `rmread.rmtext.tokenize`; keeps AST and policy |
-| `tools/cite/pyproject.toml` | `rmread` moves from the `test` extra to runtime `dependencies` |
-| `tools/rm2gramps/src/rm2gramps/notes.py` | type vocabulary; `<style>`/`<range>` rendering |
-| `tools/rm2gramps/src/rm2gramps/notes_dedup.py` | dedup key `(type, text)`; transcriptions as notes |
-| `tools/rm2gramps/src/rm2gramps/writer.py` | attach transcription noterefs to `<source>` / `<citation>` |
+| `rmread/src/rmread/rmtext.py` | **new** — shared dialect: `tokenize`, `plain_text`, `normalize_newlines` |
+| `rmread/tests/test_rmtext.py` | **new** — dialect tests |
+| `rmcite/src/rmcite/parser.py` | rebuild on `rmread.rmtext.tokenize`; keeps AST and policy |
+| `rmcite/pyproject.toml` | `rmread` moves from the `test` extra to runtime `dependencies` |
+| `src/rm2gramps/notes.py` | type vocabulary; `<style>`/`<range>` rendering |
+| `src/rm2gramps/notes_dedup.py` | dedup key `(type, text)`; transcriptions as notes |
+| `src/rm2gramps/writer.py` | attach transcription noterefs to `<source>` / `<citation>` |
 
 `rmread`'s layout stays flat (`db`, `event`, `family`, `person`,
 `format`, `linktables`); `rmtext` joins them.
@@ -245,9 +245,9 @@ Status: **T40–T44 done** (commits `7357ac8`, `559c5d0`, `1168052`,
 
 ### T40. `rmread.rmtext` (test-first)
 
-New module `tools/rmread/src/rmread/rmtext.py`, new test file
-`tools/rmread/tests/test_rmtext.py`. One RED→GREEN cycle per test
-below; run `pytest tools/rmread/tests/test_rmtext.py -v` after each.
+New module `rmread/src/rmread/rmtext.py`, new test file
+`rmread/tests/test_rmtext.py`. One RED→GREEN cycle per test
+below; run `pytest rmread/tests/test_rmtext.py -v` after each.
 
 - `tokenize` splits text, `<b>`/`<i>` (and `<strong>`/`<em>`), `<br>`,
   `<a href>`; an unknown `<assistant curate>` comes back as a `tag`
@@ -267,8 +267,8 @@ unknown tags still stripped (contents kept), entities still decoded,
 paragraphs still split on blank lines. `rmcite/richtext.py` and
 `rmcite/__init__.py` keep their public shape, so `from rmcite import
 parse` and `from rmcite.richtext import Document` are unchanged.
-`tools/cite/pyproject.toml` declares the runtime dependency;
-`tools/cite/README.org`, `DEVELOPMENT.org`, `contract.py` and
+`rmcite/pyproject.toml` declares the runtime dependency;
+`rmcite/README.org`, `DEVELOPMENT.org`, `contract.py` and
 `plans/repo-split.md` are updated to say rmcite now imports rmread for
 the shared dialect while still pinning the rm-dump version by copy.
 
@@ -329,7 +329,7 @@ note's text length, every `<note>` type is a known Gramps type.
   `styledtexttagtype.py`, `grampstype.py`, `note.py`;
   `gramps/plugins/export/exportxml.py`;
   `gramps/plugins/importer/importxml.py`.
-- `tools/rmread/docs/rm11-schema.md` — the RM11 schema reference.
+- `rmread/docs/rm11-schema.md` — the RM11 schema reference.
 
 ## Done means
 
@@ -346,7 +346,7 @@ note's text length, every `<note>` type is a known Gramps type.
 
 ## Verification record
 
-Full SampleTree.rmtree export, `tools/rm2gramps/tests/data/grampsxml.dtd`
+Full SampleTree.rmtree export, `tests/data/grampsxml.dtd`
 checked by `tests/grampsdtd.py`:
 
 | Check | Result |

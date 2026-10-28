@@ -11,7 +11,7 @@ Pure renderers: ``events.py``, ``people.py``, ``families.py``,
 out, and never touch sqlite3 — keeps them unit-testable without a
 live DB. This module owns all the SQL.
 
-Schema reference: ``tools/rmread/docs/rm11-schema.md``.
+Schema reference: ``rmread/docs/rm11-schema.md``.
 """
 
 from __future__ import annotations
@@ -1258,7 +1258,7 @@ def _load_note_texts_by_owner(
     _bulk("FamilyTable", "FamilyID", "Note", family_ids, "Family")
     # SourceTable and CitationTable have no `Note` column — the
     # free-form text column on those tables is `Comments`. Per
-    # ``tools/rmread/docs/rm11-schema.md`` § "SourceTable" and
+    # ``rmread/docs/rm11-schema.md`` § "SourceTable" and
     # "CitationTable" verified against SampleTree.rmtree.
     _bulk("SourceTable", "SourceID", "Comments", source_ids, "Source")
     _bulk("CitationTable", "CitationID", "Comments",

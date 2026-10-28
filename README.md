@@ -180,19 +180,32 @@ Standard src-layout package. The CLI entry point
 
 ```sh
 # from the repository root — resolves the rmread dependency
-uv sync --all-packages --all-extras
+uv sync --all-extras
 uv run rm2gramps --help
-
-# or, from inside tools/rm2gramps/ (pip resolves rmread from PyPI
-# once it is published there):
-pip install -e .
 ```
 
 `rm2gramps` depends on `rmread` for the SQLite open path and the
 shared markup dialect, and declares it as a runtime dependency. Both
-are stdlib-only Python; no third-party packages. `rmread` is not yet
-on PyPI, so in a checkout the workspace root (`pyproject.toml` at the
-repository root) is what makes the dependency resolvable.
+are stdlib-only Python; no third-party packages.
+
+`rmread` is not yet on PyPI. Until it is, this repository resolves it
+from a **sibling checkout** via `[tool.uv.sources]`:
+
+```toml
+[tool.uv.sources]
+rmread = { path = "../rmread", editable = true }
+```
+
+So the two repositories are expected to sit side by side:
+
+```
+~/projects/
+├── rmread/       ← the read-only RootsMagic reader
+└── rm2gramps/    ← this repository
+```
+
+Delete that `[tool.uv.sources]` block once `rmread` is published and
+`dependencies = ["rmread>=0.0.1"]` can be resolved from an index.
 
 ## Usage
 
@@ -318,7 +331,7 @@ Two things about `writer.py` that are easy to break:
 use `SampleTree.rmtree` (RM 11.0, 4.6 MB) at the repo root.
 
 ```sh
-uv run pytest tools/rm2gramps/tests/
+uv run pytest tests/
 ```
 
 The integration tests need the `SampleTree.rmtree` sample database. It
@@ -328,7 +341,7 @@ at it to run them:
 
 ```sh
 RM_SAMPLE_TREE=/path/to/SampleTree.rmtree \
-  uv run pytest tools/rm2gramps/tests/
+  uv run pytest tests/
 ```
 
 ### Schema conformance (`test_schema.py`)
@@ -385,8 +398,9 @@ pass could only ever append at the end.
 ## Schema reference
 
 RM column names, FactType IDs, and link-table semantics live in
-`tools/rmread/docs/rm11-schema.md`. The Gramps XML format reference
-is `example.gramps` at the repo root.
+`docs/rm11-schema.md` of the **sibling `rmread` repository** — one
+source of truth for the RootsMagic schema, not a copy of it. The Gramps
+XML format reference is `example.gramps` at this repository's root.
 
 ## Roadmap
 

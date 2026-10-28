@@ -1,6 +1,6 @@
 """Tests for rm2gramps.sources — SourceTable row → <source> element.
 
-T12 cases from ``tools/rm2gramps/plans/v2.1-citations-and-sources.md``
+T12 cases from ``plans/v2.1-citations-and-sources.md``
 § T12:
 
 - minimum (Name + IsPrivate=0)

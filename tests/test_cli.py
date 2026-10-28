@@ -4,7 +4,7 @@ T9 (CLI half): the CLI opens the input .rmtree, walks the DB, and
 writes a (gzipped) .gramps to disk. It is a thin shim over
 ``rm2gramps.writer.export_database`` and ``gzip.GzipFile``.
 
-Cases from ``tools/rm2gramps/plans/rm2gramps.md`` § T9:
+Cases from ``plans/rm2gramps.md`` § T9:
 - default: output is gzipped (magic bytes ``\\x1f\\x8b``)
 - ``--no-gzip``: output is raw XML (starts with ``<?xml``)
 - ``--person-ids``: subset the export

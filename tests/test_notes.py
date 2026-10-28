@@ -1,6 +1,6 @@
 """Tests for rm2gramps.notes — synthesised note → <note> element.
 
-T22 cases from ``tools/rm2gramps/plans/v2.2-notes-media-repositories.md``
+T22 cases from ``plans/v2.2-notes-media-repositories.md``
 § T22:
 
 - minimum: non-empty text → <note handle=… id=… type=…><text>…</text></note>

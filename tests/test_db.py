@@ -12,7 +12,7 @@ rm2gramps relies on:
 - a missing file raises ``FileNotFoundError``
 
 ``test_query_only_enforced`` and the schema-rejection edge cases are
-covered by ``tools/rmread/tests/test_db_rmnocase.py`` and are not
+covered by ``rmread/tests/test_db_rmnocase.py`` and are not
 duplicated here.
 """
 
@@ -49,7 +49,7 @@ def test_rmnocase_registered() -> None:
     """rm2gramps queries PlaceTable.Name (COLLATE RMNOCASE) directly.
 
     This is the regression test for the showstopper documented in
-    ``tools/rmread/docs/rm11-schema.md`` § "The ``RMNOCASE``
+    ``rmread/docs/rm11-schema.md`` § "The ``RMNOCASE``
     collation" — pre-fix it raises
     ``OperationalError: no such collation sequence: RMNOCASE``.
     """

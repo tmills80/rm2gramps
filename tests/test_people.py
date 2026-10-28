@@ -1,6 +1,6 @@
 """Tests for rm2gramps.people — PersonTable + NameTable rows → <person>.
 
-T7 cases from ``tools/rm2gramps/plans/rm2gramps.md`` § T7:
+T7 cases from ``plans/rm2gramps.md`` § T7:
 
 - person minimum (gender, primary name, _UID attribute)
 - eventrefs in chronological (SortDate) order

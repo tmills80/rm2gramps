@@ -1,6 +1,6 @@
 """Tests for rm2gramps.families — FamilyTable row → <family> element.
 
-T6 cases from ``tools/rm2gramps/plans/rm2gramps.md`` § T6:
+T6 cases from ``plans/rm2gramps.md`` § T6:
 
 - both parents → <family> with <father>, <mother>, <rel type="Married"/>
 - single parent (father only) → <rel type="Unknown"/>, no <mother>

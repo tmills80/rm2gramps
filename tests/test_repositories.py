@@ -1,6 +1,6 @@
 """Tests for rm2gramps.repositories — AddressTable row → <repository> element.
 
-T24 cases from ``tools/rm2gramps/plans/v2.2-notes-media-repositories.md``
+T24 cases from ``plans/v2.2-notes-media-repositories.md``
 § T24:
 
 - minimum: AddressID + Name → <repository handle=… id=…><rname>…</rname></repository>

@@ -3,7 +3,7 @@
 Only the five XML predefined entities are handled — sufficient for
 genealogical text (names, places, occupation descriptions) which
 doesn't contain control characters. Sourced from
-``tools/rm2gramps/src/rm2gramps/events.py`` where it originated; lifted
+``src/rm2gramps/events.py`` where it originated; lifted
 to a module of its own once ``places.py`` also needed it.
 """
 

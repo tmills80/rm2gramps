@@ -7,7 +7,7 @@ text is empty (the caller skips emission in that case).
 The ``NoteRecord`` is synthesised by the writer from inline RM
 ``Note TEXT`` columns on Person / Event / Family / Source / Place
 / Citation. RM has no separate NoteTable — see
-``tools/rm2gramps/plans/v2.2-notes-media-repositories.md`` §
+``plans/v2.2-notes-media-repositories.md`` §
 "Decision 1" for why.
 
 Empty text returns the empty string. The writer's

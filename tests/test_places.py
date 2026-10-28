@@ -1,6 +1,6 @@
 """Tests for rm2gramps.places — PlaceTable row → <placeobj> element.
 
-T5 cases from ``tools/rm2gramps/plans/rm2gramps.md`` § T5:
+T5 cases from ``plans/rm2gramps.md`` § T5:
 
 - minimum: PlaceID + Name → <placeobj> with <ptitle> + <pname>
 - empty name: PlaceID set, Name="" → <placeobj> with id but no

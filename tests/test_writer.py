@@ -218,14 +218,35 @@ def test_writer_is_deterministic_across_two_runs() -> None:
 
     `change_ts` must be pinned. Without it the writer stamps
     `datetime.now()` into every `change="…"` attribute, so two runs
-    a second apart legitimately differ — documented in the tool README
-    ("CLI output is not byte-reproducible unless you script the
-    library call"). This test asserts the property that *is* ours to
-    guarantee: same input plus same change_ts → same bytes.
+    a second apart legitimately differ. This test asserts the
+    property that *is* ours to guarantee: same input plus same
+    change_ts → same bytes.
     """
     payload_a = export_database(SAMPLE_TREE, change_ts=1700000000)
     payload_b = export_database(SAMPLE_TREE, change_ts=1700000000)
     assert payload_a == payload_b
+
+
+@requires_sample_tree
+def test_header_date_follows_the_pinned_change_ts() -> None:
+    """The <created date=…> header is derived from change_ts.
+
+    A header date read from the clock would make every export differ
+    from the previous day's, however carefully the change timestamp
+    was pinned.
+    """
+    payload = export_database(SAMPLE_TREE, change_ts=1700000000)
+    # 1700000000 is 2023-11-14 22:13:20 UTC.
+    assert b'<created date="2023-11-14"' in payload
+
+
+@requires_sample_tree
+def test_explicit_header_date_overrides_the_derived_one() -> None:
+    """An explicit header_date wins."""
+    payload = export_database(
+        SAMPLE_TREE, change_ts=1700000000, header_date="1999-12-31",
+    )
+    assert b'<created date="1999-12-31"' in payload
 
 
 @requires_sample_tree

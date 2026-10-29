@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rm2gramps"
-version = "0.2.0"
+version = "0.3.0"
 description = "Convert RootsMagic 11 .rmtree SQLite databases to Gramps XML .gramps files."
 license = "MIT"
 requires-python = ">=3.12"

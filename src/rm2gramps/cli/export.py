@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import os
 import sys
 from pathlib import Path
 
@@ -50,6 +51,17 @@ def _build_parser() -> argparse.ArgumentParser:
             "families and family events are narrowed to those that "
             "reference any of the given persons. Default: export the "
             "entire database."
+        ),
+    )
+    p.add_argument(
+        "--change-ts",
+        type=int,
+        help=(
+            "Pin every change=\"…\" attribute to this Unix-seconds value, "
+            "and derive the <created date=…> header date from it. The "
+            "export is then byte-reproducible: the same .rmtree and the "
+            "same --change-ts always produce the same bytes. Overrides "
+            "the SOURCE_DATE_EPOCH environment variable."
         ),
     )
     p.add_argument(
@@ -87,19 +99,42 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: --person-ids: {e}", file=sys.stderr)
         return 2
 
+    # The timestamp every change="…" attribute carries. Precedence:
+    # --change-ts, then SOURCE_DATE_EPOCH, then the clock. Pinning it
+    # (either way) is what makes the export byte-reproducible.
+    change_ts: int | None = args.change_ts
+    ts_source = "--change-ts" if change_ts is not None else ""
+    if change_ts is None:
+        env = os.environ.get("SOURCE_DATE_EPOCH")
+        if env is not None and env.strip():
+            try:
+                change_ts = int(env.strip())
+            except ValueError:
+                print(
+                    f"error: SOURCE_DATE_EPOCH is not an integer: {env!r}",
+                    file=sys.stderr,
+                )
+                return 2
+            ts_source = "SOURCE_DATE_EPOCH"
+
     if not args.quiet:
         ids_msg = (
             f"({len(person_ids)} persons) " if person_ids is not None else ""
         )
+        ts_msg = f" (change_ts={change_ts} via {ts_source})" if ts_source else ""
         print(
-            f"# reading {rmtree_path} {ids_msg}…",
+            f"# reading {rmtree_path} {ids_msg}{ts_msg}…",
             file=sys.stderr,
             end="",
             flush=True,
         )
 
     try:
-        payload = export_database(rmtree_path, person_ids=person_ids)
+        payload = export_database(
+            rmtree_path,
+            person_ids=person_ids,
+            change_ts=change_ts,
+        )
     except FileNotFoundError as e:
         print(f"\nerror: {e}", file=sys.stderr)
         return 2
@@ -111,8 +146,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.no_gzip:
             out_path.write_bytes(payload)
         else:
-            with gzip.open(out_path, "wb") as f:
-                f.write(payload)
+            # mtime=0 and no stored filename: the gzip header must not
+            # carry the clock or the output path, or two identical
+            # exports would differ byte for byte.
+            with out_path.open("wb") as raw:
+                with gzip.GzipFile(
+                    filename="", mode="wb", fileobj=raw, mtime=0
+                ) as f:
+                    f.write(payload)
     except OSError as e:
         print(f"\nerror: could not write {out_path}: {e}", file=sys.stderr)
         return 2

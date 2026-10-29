@@ -631,6 +631,7 @@ def export_database(
     *,
     person_ids: Sequence[int] | None = None,
     change_ts: int | None = None,
+    header_date: str | None = None,
 ) -> bytes:
     """Open the .rmtree and render the full Gramps XML document.
 
@@ -648,6 +649,11 @@ def export_database(
         attribute. ``None`` (default) uses ``datetime.now()`` so two
         exports in the same minute are byte-equal but exports
         minutes apart differ — that's what Gramps itself does.
+    header_date
+        The ``<created date=\"…\">`` value, as ``YYYY-MM-DD``.
+        ``None`` (default) derives it from ``change_ts`` — the UTC
+        date of that timestamp — so a pinned ``change_ts`` pins the
+        whole document. Pass an explicit string to override.
 
     Returns
     -------
@@ -853,7 +859,14 @@ def export_database(
             for xml, e in zip(event_strs, events)
         ]
 
-        header_date = _dt.date.today().isoformat()
+        # The <created date="…"> value. Derived from the change
+        # timestamp so that pinning change_ts pins the whole
+        # document — a header date read from the clock would make
+        # every export differ from the previous day's.
+        if header_date is None:
+            header_date = _dt.datetime.fromtimestamp(
+                ts, _dt.timezone.utc
+            ).date().isoformat()
 
         # v2.2: notes + noteref cross-references. We run the dedup
         # loader once for the entire DB, then batch-fetch each
@@ -1072,7 +1085,7 @@ def export_database(
         # <event> wants it after).
         return write_database(
             header_date=header_date,
-            version="rm2gramps/0.2.0",
+            version="rm2gramps/0.3.0",
             events=tuple(reorder_children(x) for x in event_strs),
             people=tuple(reorder_children(x) for x in people_strs),
             families=tuple(reorder_children(x) for x in family_strs),

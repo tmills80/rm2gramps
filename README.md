@@ -13,14 +13,14 @@ fact-type vocabulary, full citation detail, multimedia links, and
 the full place hierarchy. This tool goes directly from `.rmtree` to
 `.gramps` and preserves all of that.
 
-## Status: v3.2
+## Status: v3.3
 
-v3.2 ships all nine Gramps object types that `.gramps` supports, with
+v3.3 ships all nine Gramps object types that `.gramps` supports, with
 notes that mean what Gramps means by a note — right type, real
 transcriptions, and RootsMagic's markup carried across as style ranges
-— with note handles that survive a change in the export, and with
-every citation RootsMagic links to a person actually reaching that
-person in the output.
+— with note handles that survive a change in the export, with every
+citation RootsMagic links to a person actually reaching that person in
+the output, and with a **byte-reproducible** command-line export.
 
 | Version | Adds |
 |---|---|
@@ -31,6 +31,31 @@ person in the output.
 | v3 | typed notes, transcriptions, styling |
 | v3.1 | content-derived note handles |
 | v3.2 | person-level citations recovered (RM owner types 7 and 19) |
+| v3.3 | byte-reproducible CLI output (`--change-ts`, `SOURCE_DATE_EPOCH`) |
+
+### v3.3 — byte-reproducible exports
+
+An export is evidence. "Here is the file this claim came from" has to
+mean the same file tomorrow, or a researcher has to trust that nobody
+edited it.
+
+The document had two moving parts: every `change="…"` attribute, and
+the `<created date="…">` header. The header was `date.today()` — read
+from the clock — so even a perfectly pinned export differed from the
+previous day's.
+
+Both now come from one number. The header date is derived from the
+change timestamp (its UTC date), and the CLI passes that timestamp
+through `--change-ts` or `SOURCE_DATE_EPOCH`:
+
+```sh
+rm2gramps Tree.rmtree out.gramps --change-ts 1700000000
+```
+
+The gzip header was the last moving part: it stored the current time
+and the output file's name. It now stores neither, so the **file on
+disk** is byte-identical between runs — not just the XML inside it.
+Two runs writing to differently-named files produce the same bytes.
 
 ### v3.2 — person-level citations
 
@@ -279,7 +304,8 @@ Delete that `[tool.uv.sources]` block once `rmread` is published and
 ## Usage
 
 ```
-rm2gramps [-h] [--no-gzip] [--person-ids IDS] [--quiet] rmtree out_gramps
+rm2gramps [-h] [--no-gzip] [--person-ids IDS] [--change-ts TS]
+           [--quiet] rmtree out_gramps
 
 positional:
   rmtree         path to input .rmtree (read-only)
@@ -289,6 +315,10 @@ options:
   --no-gzip      write raw XML instead of gzipped output
   --person-ids   comma-separated PersonID subset to export
                  (default: export the entire database)
+  --change-ts    pin every change="…" attribute to this Unix-seconds
+                 value and derive the <created date=…> header from it;
+                 makes the export byte-reproducible
+                 (overrides SOURCE_DATE_EPOCH)
   --quiet        suppress progress output to stderr
   -h, --help     show this help
 ```
@@ -304,6 +334,10 @@ rm2gramps FamilyTree.rmtree out.gramps --no-gzip
 
 # Subset: only persons 1, 2, 3 and their immediate relatives
 rm2gramps FamilyTree.rmtree subset.gramps --person-ids 1,2,3
+
+# Byte-reproducible: the same tree and the same timestamp always
+# produce the same file, byte for byte
+rm2gramps FamilyTree.rmtree out.gramps --change-ts 1700000000
 
 # Quiet (no progress on stderr; suitable for pipelines)
 rm2gramps FamilyTree.rmtree out.gramps.gz --quiet
@@ -323,9 +357,20 @@ Every export is byte-deterministic for a given `.rmtree` **when
 `change_ts` is fixed**. `export_database(..., change_ts=N)` embeds `N`
 in every `change="…"` attribute and is reproducible across any time
 interval; omit it and the value is `datetime.now()`, so two runs a
-minute apart differ (matching Gramps' own behaviour). The `rm2gramps`
-CLI does not pass `change_ts`, so CLI output is not byte-reproducible
-unless you script the library call.
+minute apart differ (matching Gramps' own behaviour).
+
+The `<created date="…">` header is derived from that same timestamp,
+so pinning it pins the whole document. On the command line:
+
+```sh
+rm2gramps Tree.rmtree out.gramps --change-ts 1700000000
+```
+
+`SOURCE_DATE_EPOCH` does the same job when the environment sets it
+(the reproducible-builds convention); `--change-ts` wins if both are
+given. The gzip header carries neither the clock nor the output path,
+so the **file on disk** is byte-identical between runs too — not just
+the XML inside it.
 
 ## Identity
 

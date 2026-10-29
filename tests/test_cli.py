@@ -48,6 +48,97 @@ def test_cli_writes_gzipped_file_by_default(tmp_path: Path) -> None:
 
 
 @requires_sample_tree
+def test_cli_same_change_ts_gives_identical_bytes(tmp_path: Path) -> None:
+    """Two exports with the same --change-ts are byte-identical.
+
+    This is the property a research note depends on: "here is the
+    file this claim came from" has to mean the same file tomorrow.
+    """
+    first = tmp_path / "a.gramps"
+    second = tmp_path / "b.gramps"
+    assert main([str(SAMPLE_TREE), str(first), "--change-ts", "1700000000"]) == 0
+    assert main([str(SAMPLE_TREE), str(second), "--change-ts", "1700000000"]) == 0
+    assert first.read_bytes() == second.read_bytes(), (
+        "two exports with the same --change-ts differ"
+    )
+
+
+@requires_sample_tree
+def test_cli_gzipped_output_is_byte_identical(tmp_path: Path) -> None:
+    """The gzip header carries neither the clock nor the output path."""
+    first = tmp_path / "a.gramps"
+    second = tmp_path / "b-different-name.gramps"
+    assert main([str(SAMPLE_TREE), str(first), "--change-ts", "1700000000"]) == 0
+    assert main([str(SAMPLE_TREE), str(second), "--change-ts", "1700000000"]) == 0
+    assert first.read_bytes() == second.read_bytes(), (
+        "the gzipped output differs between runs — the gzip header is "
+        "not deterministic"
+    )
+
+
+@requires_sample_tree
+def test_cli_different_change_ts_gives_different_bytes(tmp_path: Path) -> None:
+    """The pin is not ignored: two timestamps, two documents."""
+    first = tmp_path / "a.gramps"
+    second = tmp_path / "b.gramps"
+    assert main([str(SAMPLE_TREE), str(first), "--change-ts", "1700000000"]) == 0
+    assert main([str(SAMPLE_TREE), str(second), "--change-ts", "1700000600"]) == 0
+    assert first.read_bytes() != second.read_bytes()
+
+
+@requires_sample_tree
+def test_cli_source_date_epoch_is_honoured(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SOURCE_DATE_EPOCH pins the export when --change-ts is absent."""
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1700000000")
+    out = tmp_path / "sde.gramps"
+    assert main([str(SAMPLE_TREE), str(out)]) == 0
+
+    explicit = tmp_path / "explicit.gramps"
+    assert main([str(SAMPLE_TREE), str(explicit), "--change-ts", "1700000000"]) == 0
+    assert out.read_bytes() == explicit.read_bytes(), (
+        "SOURCE_DATE_EPOCH did not produce the same export as the "
+        "equivalent --change-ts"
+    )
+
+
+@requires_sample_tree
+def test_cli_change_ts_overrides_source_date_epoch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--change-ts wins over the environment variable."""
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1700000000")
+    out = tmp_path / "override.gramps"
+    assert main([str(SAMPLE_TREE), str(out), "--change-ts", "1800000000"]) == 0
+
+    other = tmp_path / "other.gramps"
+    assert main([str(SAMPLE_TREE), str(other), "--change-ts", "1800000000"]) == 0
+    assert out.read_bytes() == other.read_bytes()
+
+    pinned = tmp_path / "pinned.gramps"
+    assert main([str(SAMPLE_TREE), str(pinned), "--change-ts", "1700000000"]) == 0
+    assert out.read_bytes() != pinned.read_bytes(), (
+        "--change-ts did not override SOURCE_DATE_EPOCH"
+    )
+
+
+def test_cli_bad_source_date_epoch_exits_two(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A non-integer SOURCE_DATE_EPOCH is an error, not a silent fallback."""
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "not-a-number")
+    out = tmp_path / "bad.gramps"
+    rc = main([str(SAMPLE_TREE), str(out)])
+    assert rc == 2
+    assert "SOURCE_DATE_EPOCH" in capsys.readouterr().err
+
+
+@requires_sample_tree
 def test_cli_no_gzip_writes_raw_xml(tmp_path: Path) -> None:
     """``--no-gzip`` produces raw XML starting with the declaration."""
     out = tmp_path / "out.gramps"

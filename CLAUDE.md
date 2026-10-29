@@ -91,9 +91,11 @@ Rules that the code enforces and the tests pin:
 - Unreferenced `<citation>` / `<source>` are **expected**, not a bug:
   some RM trees contain citations no owner links to. Every `<object>` /
   `<note>`, by contrast, must have at least one referencing owner.
-- `export_database(..., change_ts=N)` pins every `change=` attribute, but
-  `header_date` is `date.today()` and the CLI never passes `change_ts`,
-  so **CLI output is not byte-reproducible**.
+- `export_database(..., change_ts=N)` pins every `change=` attribute, and
+  the `<created date=…>` header is derived from that same timestamp.
+  The CLI passes it through `--change-ts` (or `SOURCE_DATE_EPOCH`), and
+  the gzip header carries neither the clock nor the path — so **CLI
+  output is byte-reproducible**.
 - Gramps XML is validated against a **DTD**, not an XSD.
   `tests/grampsdtd.py` is a stdlib content-model matcher;
   `tests/test_grampsdtd.py` asserts it *rejects* known-bad shapes so the

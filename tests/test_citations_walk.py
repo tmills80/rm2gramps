@@ -146,36 +146,112 @@ def test_writer_does_not_have_a_citations_walk_module() -> None:
 
 
 @requires_sample_tree
-def test_walk_warns_on_unknown_owner_type(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Unknown OwnerType values trigger a log warning; no exception."""
-    caplog.set_level(logging.WARNING, logger="rm2gramps.citations_walk")
+def test_walk_folds_person_level_owner_types_into_person() -> None:
+    """OwnerTypes 7 and 19 are person-level citations, not unknowns.
+
+    RM stores a citation against a person twice over: once on the
+    fact (owner type 0) and once on the person itself (owner types 7
+    and 19). rmread folds 7 and 19 into the ``Person`` bucket; before
+    that they were dropped and 33 links — including the only link to
+    4 citations — were lost.
+    """
     db = open_database(SAMPLE_TREE)
     try:
-        # No assertion on the warning content — just that one fires
-        # when unknown OwnerTypes are encountered (SampleTree has 7
-        # and 19).
-        walk_citation_links(db.con)
+        result = walk_citation_links(db.con)
+        levels = db.con.execute(
+            "SELECT OwnerType, COUNT(*) FROM CitationLinkTable "
+            "WHERE OwnerType IN (7, 19) GROUP BY OwnerType"
+        ).fetchall()
     finally:
         db.close()
 
-    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
-    assert len(warnings) >= 1, "expected at least one warning for unknown OwnerTypes"
-    # And the warning mentions OwnerType
-    assert any("OwnerType" in r.getMessage() for r in warnings)
+    folded = {int(r[0]): int(r[1]) for r in levels}
+    assert folded == {7: 24, 19: 9}, (
+        f"unexpected person-level owner type counts: {folded}"
+    )
+
+    # The Person bucket must now carry those 33 links too.
+    person_links = sum(len(v) for v in result["Person"].values())
+    assert person_links >= 33, (
+        f"the Person bucket holds {person_links} links — the 33 person-level "
+        f"links are missing"
+    )
 
 
 @requires_sample_tree
-def test_walk_skips_unknown_owner_types_silently() -> None:
-    """Returned dict has no key for unknown OwnerTypes — only the five
-    buckets in the verified OwnerType enum. OwnerTypes 7 and 19 appear
-    in SampleTree and are outside the enum, so they are dropped."""
+def test_walk_returns_only_the_five_known_buckets() -> None:
+    """The returned dict has only the five buckets of the global enum."""
     db = open_database(SAMPLE_TREE)
     try:
         result = walk_citation_links(db.con)
     finally:
         db.close()
+
+    # Only the known owner types appear in the result.
+    assert all(
+        k in {"Person", "Family", "Event", "Source", "Citation"}
+        for k in result.keys()
+    )
+
+
+def test_walk_warns_and_drops_an_unknown_owner_type(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An owner type outside 0–4 and outside {7, 19} is warned and dropped.
+
+    Built on a synthetic database so the behaviour is pinned even
+    though SampleTree has no remaining unknown owner types.
+    """
+    import sqlite3
+    import unicodedata
+
+    bogus = tmp_path / "unknown_owner.rmtree"
+    con = sqlite3.connect(bogus)
+    con.execute(
+        "CREATE TABLE ConfigTable ("
+        "RecID INTEGER PRIMARY KEY, RecType INTEGER, Title TEXT, DataRec BLOB)"
+    )
+    root_blob = (
+        b'<Root><Version>11000</Version><STVersion>700</STVersion>'
+        b'<UniqueID>x</UniqueID><RootPerson>1</RootPerson></Root>'
+    )
+    con.create_collation(
+        "RMNOCASE",
+        lambda s, _n=None: None if s is None else "".join(
+            c for c in unicodedata.normalize("NFKD", str(s))
+            if not unicodedata.combining(c)
+        ).casefold(),
+    )
+    con.execute("INSERT INTO ConfigTable VALUES (1, 1, '', ?)", (root_blob,))
+    con.execute(
+        "CREATE TABLE CitationLinkTable ("
+        "LinkID INTEGER PRIMARY KEY, CitationID INTEGER, OwnerType INTEGER,"
+        "OwnerID INTEGER, SortOrder INTEGER, Quality TEXT, IsPrivate INTEGER,"
+        "Flags INTEGER, UTCModDate FLOAT)"
+    )
+    con.execute(
+        "INSERT INTO CitationLinkTable "
+        "(CitationID, OwnerType, OwnerID) VALUES (11, 42, 5)"
+    )
+    con.commit()
+    con.close()
+
+    caplog.set_level(logging.WARNING)
+    db = open_database(bogus)
+    try:
+        result = walk_citation_links(db.con)
+    finally:
+        db.close()
+
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warnings, "expected a warning for an unknown OwnerType"
+    assert any("OwnerType" in r.getMessage() for r in warnings)
+
+    # The row was dropped: no bucket mentions it.
+    assert all(not v for v in result.values()), (
+        "the unknown owner type was not dropped"
+    )
 
     # Only the known owner types appear in the result.
     assert all(

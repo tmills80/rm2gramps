@@ -1072,7 +1072,7 @@ def export_database(
         # <event> wants it after).
         return write_database(
             header_date=header_date,
-            version="rm2gramps/0.1.0",
+            version="rm2gramps/0.2.0",
             events=tuple(reorder_children(x) for x in event_strs),
             people=tuple(reorder_children(x) for x in people_strs),
             families=tuple(reorder_children(x) for x in family_strs),

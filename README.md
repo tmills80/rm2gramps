@@ -13,12 +13,14 @@ fact-type vocabulary, full citation detail, multimedia links, and
 the full place hierarchy. This tool goes directly from `.rmtree` to
 `.gramps` and preserves all of that.
 
-## Status: v3.1
+## Status: v3.2
 
-v3.1 ships all nine Gramps object types that `.gramps` supports, with
+v3.2 ships all nine Gramps object types that `.gramps` supports, with
 notes that mean what Gramps means by a note — right type, real
 transcriptions, and RootsMagic's markup carried across as style ranges
-— and with note handles that survive a change in the export.
+— with note handles that survive a change in the export, and with
+every citation RootsMagic links to a person actually reaching that
+person in the output.
 
 | Version | Adds |
 |---|---|
@@ -28,6 +30,36 @@ transcriptions, and RootsMagic's markup carried across as style ranges
 | v2.3 | schema conformance fix against the Gramps DTD |
 | v3 | typed notes, transcriptions, styling |
 | v3.1 | content-derived note handles |
+| v3.2 | person-level citations recovered (RM owner types 7 and 19) |
+
+### v3.2 — person-level citations
+
+RootsMagic records a citation against a person twice over: once on
+the *fact* (the birth, the census) and once on the *person*. The
+fact-level citation goes through `EventTable`; the person-level one
+goes through `CitationLinkTable` with owner type `0`.
+
+RM also uses two owner types outside the global enum — `7` and `19` —
+for the same thing. rm2gramps treated them as unknown and dropped
+them: **33 citation links** went missing, and 4 citations in
+SampleTree were reachable *only* through them, so they reached Gramps
+with no owner at all.
+
+They are folded into the person bucket now (`rmread.linktables.
+CITATION_PERSON_OWNER_TYPES`). Verified against SampleTree: all 33
+owner ids resolve to people, and in 20 of the 24 type-7 rows the
+citation's source is also cited by that same person's own facts —
+the signature of a citation copied up from a fact to the person.
+
+| | before | after |
+|---|---|---|
+| `<citationref>` on people | 17 | 50 |
+| citations emitted | 434 | 435 |
+| citations with no owner | 11 | 8 |
+
+RM's precise label for the difference between 7 and 19 is not
+recoverable from the file alone; both are attached to the person,
+which is where they live in RootsMagic.
 
 ### v3.1 — content-derived note handles
 
@@ -133,7 +165,7 @@ Enforced by the round-trip test:
   export).
 - Every `<object>` / `<note>` has at least one referencing owner.
   **Not** true of every `<citation>` or `<source>`: RM trees contain
-  citations no owner links to (11 of 434 in SampleTree) and sources
+  citations no owner links to (8 of 435 in SampleTree) and sources
   whose only citation was dropped (10 of 204). Those ship unreferenced
   — harmless for import, but don't read the count as a bug.
 
@@ -195,9 +227,11 @@ Full `SampleTree.rmtree` export, checked against the vendored DTD:
 - Repository `email` is dropped: the schema has no email child on
   `<repository>` (`resemail` belongs to the `<researcher>` header).
 - Unknown OwnerType values in `CitationLinkTable` /
-  `MediaLinkTable` are warned once and skipped.
+  `MediaLinkTable` are warned once and skipped. Owner types 7 and 19
+  are **not** unknown — they are person-level citations and are
+  exported (see v3.2).
 - `SourceTemplateTable` → Gramps name-formats is deferred; so are
-  RM-internal owner types 7 and 19, and `CitationLinkTable.Quality` →
+  `CitationLinkTable.Quality` →
   `<confidence>` (RM's quality is a per-link scale, Gramps'
   confidence is per-citation — they do not map).
 

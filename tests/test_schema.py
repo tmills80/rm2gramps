@@ -44,7 +44,7 @@ def _wrap(inner: str, section: str) -> ET.Element:
     """
     return ET.fromstring(
         f'<database xmlns="{GRAMPS_NS}">'
-        '<header><created date="2026-01-01" version="rm2gramps/0.1.0"/>'
+        '<header><created date="2026-01-01" version="rm2gramps/0.2.0"/>'
         "<researcher/></header>"
         f"<{section}>{inner}</{section}>"
         "</database>"
@@ -318,7 +318,7 @@ def test_database_sections_follow_dtd_order() -> None:
     """
     xml = write_database(
         header_date="2026-01-01",
-        version="rm2gramps/0.1.0",
+        version="rm2gramps/0.2.0",
         events=('<event handle="_g_e1" change="0" id="E0001"/>',),
         people=('<person handle="_g_x" change="0" id="I0001">'
                 '<gender>U</gender>'

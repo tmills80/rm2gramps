@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rm2gramps"
-version = "0.1.0"
+version = "0.2.0"
 description = "Convert RootsMagic 11 .rmtree SQLite databases to Gramps XML .gramps files."
 license = "MIT"
 requires-python = ">=3.12"
-dependencies = ["rmread>=0.0.1"]
+dependencies = ["rmread>=0.0.2"]
 
 [project.optional-dependencies]
 # Test-only. rmread is a runtime dependency of this tool already; the
@@ -27,7 +27,7 @@ where = ["src"]
 [tool.uv.sources]
 # rmread is not on PyPI. Until it is published, resolve it from the
 # sibling checkout. Delete this block once rmread is released and
-# `dependencies = ["rmread>=0.0.1"]` can be resolved from an index.
+# `dependencies = ["rmread>=0.0.2"]` can be resolved from an index.
 rmread = { path = "../rmread", editable = true }
 
 [tool.pytest.ini_options]

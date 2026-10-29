@@ -128,6 +128,11 @@ Three rules the code enforces and the tests pin:
   sequential, per-export, and must not be used to identify a note
   between two files. The key and the handle are derived in one place
   (`notes.note_key`) so they cannot drift apart.
+- **RM's citation owner types 7 and 19 are person-level citations**,
+  not unknown types. `rmread.linktables.CITATION_PERSON_OWNER_TYPES`
+  folds them into the `Person` bucket; dropping them cost 33 links
+  and left 4 citations with no owner at all. Any other owner type
+  outside 0–4 is warned and skipped.
 
 ## Layout
 
